@@ -126,6 +126,13 @@ export async function POST(request: NextRequest) {
         )
         return NextResponse.json({ success: true, data: addRoomParticipantResult.rows[0] })
 
+      case 'updateRoomParticipantReady':
+        const updateReadyResult = await query(
+          'UPDATE room_participants SET is_ready = $1 WHERE room_id = $2 AND player_id = $3 RETURNING *',
+          [params.isReady, params.roomId, params.playerId]
+        )
+        return NextResponse.json({ success: true, data: updateReadyResult.rows[0] })
+
       case 'updatePlayerStopStatus':
         await query(
           'UPDATE game_participants SET has_stopped = $1, stopped_at = $2 WHERE game_id = $3 AND player_id = $4',

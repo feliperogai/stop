@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Users, Play, Copy, Check, RefreshCw } from "lucide-react"
-import { getGameRoom, getGameParticipants, createGame, addGameParticipant, getRoomParticipants } from "@/lib/api-client"
+import { getGameRoom, getGameParticipants, createGame, addGameParticipant, getRoomParticipants, updateRoomParticipantReady } from "@/lib/api-client"
 import { getUserSession, updateUserSession, clearUserSession } from "@/lib/session"
 import { toast } from "sonner"
 
@@ -21,6 +21,7 @@ interface Participant {
   id: number
   player_name: string
   joined_at: string
+  is_ready?: boolean
 }
 
 export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLobbyProps) {
@@ -43,7 +44,8 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
         const formattedParticipants = participantsData.map(p => ({
           id: p.player_id,
           player_name: p.player_name,
-          joined_at: p.joined_at
+          joined_at: p.joined_at,
+          is_ready: p.is_ready || false
         }))
         
         setParticipants(formattedParticipants)
@@ -59,9 +61,45 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
     return () => clearInterval(interval)
   }, [roomCode])
 
+  const handleToggleReady = async () => {
+    if (!room) return
+    
+    const session = getUserSession()
+    if (!session) return
+    
+    const currentParticipant = participants.find(p => p.player_name === playerName)
+    if (!currentParticipant) return
+    
+    try {
+      const newReadyStatus = !currentParticipant.is_ready
+      await updateRoomParticipantReady(room.id, session.playerId, newReadyStatus)
+      
+      // Atualizar estado local
+      setParticipants(prev => 
+        prev.map(p => 
+          p.player_name === playerName 
+            ? { ...p, is_ready: newReadyStatus }
+            : p
+        )
+      )
+      
+      toast.success(newReadyStatus ? "Você está pronto!" : "Status de pronto removido")
+    } catch (error) {
+      console.error("Erro ao atualizar status de pronto:", error)
+      toast.error("Erro ao atualizar status. Tente novamente.")
+    }
+  }
+
   const handleStartGame = async () => {
     if (!room || participants.length < 2) {
       toast.error("É necessário pelo menos 2 jogadores para começar")
+      return
+    }
+
+    // Verificar se todos estão prontos
+    const allReady = participants.every(p => p.is_ready)
+    if (!allReady) {
+      toast.error("Todos os jogadores devem estar prontos para começar")
       return
     }
 
@@ -202,11 +240,22 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
                         {participant.player_name === playerName ? "Você" : "Jogador"}
                       </p>
                     </div>
-                    {index === 0 && (
-                      <Badge variant="secondary" className="text-xs">
-                        Host
-                      </Badge>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {participant.is_ready ? (
+                        <Badge variant="default" className="text-xs bg-green-500">
+                          Pronto
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-xs">
+                          Aguardando
+                        </Badge>
+                      )}
+                      {index === 0 && (
+                        <Badge variant="outline" className="text-xs">
+                          Host
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -215,45 +264,84 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
         </Card>
 
         {/* Controles */}
-        {isHost && (
-          <Card className="game-card">
-            <CardContent className="pt-6">
-              <div className="text-center space-y-4">
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">Controles do Host</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Você é o host desta sala. Você pode iniciar a partida quando todos estiverem prontos.
-                  </p>
-                </div>
-                
-                <Button
-                  onClick={handleStartGame}
-                  disabled={isStarting || participants.length < 2}
-                  className="bg-[var(--game-pink)] hover:bg-[var(--game-pink)]/80 text-white px-8 py-3 text-lg"
-                  size="lg"
-                >
-                  {isStarting ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                      Iniciando...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-5 h-5 mr-2" />
-                      Iniciar Partida
-                    </>
+        <Card className="game-card">
+          <CardContent className="pt-6">
+            <div className="text-center space-y-4">
+              {isHost ? (
+                <>
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">Controles do Host</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Você é o host desta sala. Você pode iniciar a partida quando todos estiverem prontos.
+                    </p>
+                  </div>
+                  
+                  <Button
+                    onClick={handleStartGame}
+                    disabled={isStarting || participants.length < 2 || !participants.every(p => p.is_ready)}
+                    className="bg-[var(--game-pink)] hover:bg-[var(--game-pink)]/80 text-white px-8 py-3 text-lg"
+                    size="lg"
+                  >
+                    {isStarting ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
+                        Iniciando...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-5 h-5 mr-2" />
+                        Iniciar Partida
+                      </>
+                    )}
+                  </Button>
+                  
+                  {participants.length < 2 && (
+                    <p className="text-sm text-muted-foreground">
+                      É necessário pelo menos 2 jogadores para começar
+                    </p>
                   )}
-                </Button>
-                
-                {participants.length < 2 && (
-                  <p className="text-sm text-muted-foreground">
-                    É necessário pelo menos 2 jogadores para começar
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                  
+                  {participants.length >= 2 && !participants.every(p => p.is_ready) && (
+                    <p className="text-sm text-muted-foreground">
+                      Aguardando todos os jogadores ficarem prontos
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">Status de Pronto</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Marque-se como pronto quando estiver preparado para começar a partida.
+                    </p>
+                  </div>
+                  
+                  <Button
+                    onClick={handleToggleReady}
+                    className={`px-8 py-3 text-lg ${
+                      participants.find(p => p.player_name === playerName)?.is_ready
+                        ? "bg-green-500 hover:bg-green-600 text-white"
+                        : "bg-[var(--game-teal)] hover:bg-[var(--game-teal)]/80 text-white"
+                    }`}
+                    size="lg"
+                  >
+                    {participants.find(p => p.player_name === playerName)?.is_ready ? (
+                      <>
+                        <Check className="w-5 h-5 mr-2" />
+                        Pronto!
+                      </>
+                    ) : (
+                      <>
+                        <Users className="w-5 h-5 mr-2" />
+                        Marcar como Pronto
+                      </>
+                    )}
+                  </Button>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Instruções */}
         <Card className="mt-6">

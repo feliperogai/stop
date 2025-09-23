@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS room_participants (
     room_id INTEGER REFERENCES game_rooms(id) ON DELETE CASCADE,
     player_id INTEGER REFERENCES players(id) ON DELETE CASCADE,
     player_name VARCHAR(100) NOT NULL,
+    is_ready BOOLEAN DEFAULT false, -- Se o jogador está pronto para começar
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(room_id, player_id)
 );
