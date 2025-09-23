@@ -1,32 +1,32 @@
-# 🎯 Stop Game - Versão Online com Banco Neon
+# Stop Game - Versão Online com Banco Neon
 
 Um jogo Stop online em tempo real com funcionalidades avançadas, conectado ao banco de dados Neon PostgreSQL.
 
-## ✨ Funcionalidades Implementadas
+## Funcionalidades Implementadas
 
-### 🏠 Sistema de Salas
+### Sistema de Salas
 - **Criação de salas** com código único de 6 caracteres
 - **Entrada em salas** existentes via código
 - **Lobby** com lista de jogadores em tempo real
 - **Host** pode iniciar a partida quando todos estiverem prontos
 
-### 🎮 Jogo ao Vivo
+### Jogo ao Vivo
 - **10 rodadas** por partida (conforme solicitado)
 - **STOP individual** - cada jogador pode parar quando quiser
 - **Tempo real** - atualizações automáticas a cada 2 segundos
 - **8 categorias** padrão: Nome, Animal, Objeto, Comida, Lugar, Profissão, Cor, Marca
 
-### 📊 Sistema de Avaliação
+### Sistema de Avaliação
 - **Avaliação pelos jogadores** - cada jogador avalia as respostas dos outros
 - **Pontuação em tempo real** - pontos calculados automaticamente
 - **Sistema de validação** - respostas devem começar com a letra sorteada
 
-### 🧹 Limpeza Automática
+### Limpeza Automática
 - **Dados temporários** - salas e partidas expiram em 2 horas
 - **Limpeza automática** - dados são removidos após o fim da partida
 - **Sem histórico permanente** - conforme solicitado
 
-## 🚀 Como Executar
+## Como Executar
 
 ### 1. Instalar Dependências
 ```bash
@@ -45,7 +45,7 @@ npm run dev
 
 O projeto estará disponível em `http://localhost:3000`
 
-## 🎯 Como Jogar
+## Como Jogar
 
 ### 1. Criar ou Entrar em uma Sala
 - **Criar sala**: Digite seu nome e nome da sala
@@ -82,7 +82,7 @@ O projeto estará disponível em `http://localhost:3000`
 - Dados são limpos automaticamente
 - Opção de jogar novamente
 
-## 🗄️ Estrutura do Banco de Dados
+## Estrutura do Banco de Dados
 
 ### Tabelas Principais
 - `players` - Jogadores temporários (por sessão)
@@ -101,7 +101,7 @@ O projeto estará disponível em `http://localhost:3000`
 - **Índices**: Performance otimizada com índices
 - **Cascata**: Deleção em cascata para manter consistência
 
-## 🔧 Configuração Técnica
+## Configuração Técnica
 
 ### Banco de Dados
 - **Neon PostgreSQL** - Banco em nuvem
@@ -116,27 +116,27 @@ O projeto estará disponível em `http://localhost:3000`
 - **PostgreSQL** - Banco de dados
 - **Node.js** - Runtime
 
-## 📱 Interface Responsiva
+## Interface Responsiva
 
 - **Desktop** - Layout completo com sidebar
 - **Tablet** - Layout adaptado
 - **Mobile** - Interface otimizada para touch
 
-## 🎨 Design
+## Design
 
 - **Tema moderno** - Gradientes e cores vibrantes
 - **Animações** - Transições suaves
 - **Feedback visual** - Estados claros para cada ação
 - **Acessibilidade** - Componentes Radix UI
 
-## 🔒 Segurança
+## Segurança
 
 - **Sessões temporárias** - Sem dados permanentes
 - **Validação** - Respostas validadas pelos jogadores
 - **Limpeza automática** - Dados removidos automaticamente
 - **Conexão segura** - SSL obrigatório
 
-## 🚀 Deploy
+## Deploy
 
 Para fazer deploy em produção:
 
@@ -144,7 +144,7 @@ Para fazer deploy em produção:
 2. Execute `npm run build`
 3. Execute `npm start`
 
-## 📝 Notas Importantes
+## Notas Importantes
 
 - **Dados temporários**: Nenhum dado é armazenado permanentemente
 - **Limpeza automática**: Sistema limpa dados expirados a cada 5 minutos
@@ -152,6 +152,6 @@ Para fazer deploy em produção:
 - **STOP individual**: Cada jogador controla quando para
 - **Avaliação coletiva**: Todos avaliam as respostas de todos
 
-## 🎉 Pronto para Jogar!
+## Pronto para Jogar!
 
 O sistema está completamente funcional e pronto para uso. Crie uma sala, convide amigos e divirta-se jogando Stop online em tempo real!

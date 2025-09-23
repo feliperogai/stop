@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Users, Play, Copy, Check, RefreshCw } from "lucide-react"
 import { getGameRoom, getGameParticipants, createGame, addGameParticipant } from "@/lib/api-client"
+import { getUserSession, updateUserSession, clearUserSession } from "@/lib/session"
 import { toast } from "sonner"
 
 interface GameLobbyProps {
@@ -35,9 +36,27 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
       if (roomData) {
         setRoom(roomData)
         
-        // Se já existe uma partida, buscar participantes
-        if (roomData.status === "playing" && gameId) {
-          const participantsData = await getGameParticipants(gameId)
+        // Buscar participantes da sala (mesmo sem partida iniciada)
+        const participantsData = await getGameParticipants(gameId || 0)
+        
+        // Adicionar o jogador atual se não estiver na lista
+        const currentPlayerExists = participantsData.some(p => p.player_name === playerName)
+        if (!currentPlayerExists && gameId) {
+          // Adicionar jogador atual à lista
+          const session = getUserSession()
+          if (session) {
+            const newParticipant = {
+              id: session.playerId,
+              player_name: playerName,
+              total_score: 0,
+              has_stopped: false,
+              joined_at: new Date().toISOString()
+            }
+            setParticipants([...participantsData, newParticipant])
+          } else {
+            setParticipants(participantsData)
+          }
+        } else {
           setParticipants(participantsData)
         }
       }
@@ -71,6 +90,9 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
 
       // Atualizar status da sala (será implementado na API)
       // await updateGameRoomStatus(room.id, "playing")
+
+      // Salvar gameId na sessão
+      updateUserSession({ gameId: game.id })
 
       toast.success("Partida iniciada!")
       onGameStart(game.id)

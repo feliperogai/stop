@@ -1,13 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Users, Plus, ArrowRight, Copy, Check } from "lucide-react"
-import { createGameRoom, joinGameRoom, getGameRoom, createPlayer } from "@/lib/api-client"
+import { createGameRoom, joinGameRoom, getGameRoom, createPlayer, getPlayerBySessionId } from "@/lib/api-client"
+import { saveUserSession, getUserSession, generateSessionId, updateUserSession, clearUserSession } from "@/lib/session"
 import { toast } from "sonner"
 
 interface RoomManagerProps {
@@ -22,8 +23,37 @@ export function RoomManager({ onRoomJoined }: RoomManagerProps) {
   const [isJoining, setIsJoining] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const generateSessionId = () => {
-    return Math.random().toString(36).substring(2) + Date.now().toString(36)
+  // Verificar se há sessão existente
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const existingSession = getUserSession()
+      if (existingSession) {
+        setPlayerName(existingSession.playerName)
+        
+        // Se tem sala, redirecionar automaticamente
+        if (existingSession.roomCode) {
+          handleRejoinRoom(existingSession)
+        }
+      }
+    }
+  }, [])
+
+  const handleRejoinRoom = async (session: any) => {
+    try {
+      // Verificar se a sala ainda existe
+      const room = await getGameRoom(session.roomCode)
+      if (room && room.status === "waiting") {
+        toast.success(`Reconectando à sala ${session.roomCode}...`)
+        onRoomJoined(session.roomCode, session.playerName, session.isHost || false)
+      } else {
+        // Sala não existe mais, limpar sessão
+        clearUserSession()
+        toast.info("Sala não encontrada. Criando nova sessão.")
+      }
+    } catch (error) {
+      console.error("Erro ao reconectar:", error)
+      clearUserSession()
+    }
   }
 
   const handleCreateRoom = async () => {
@@ -34,11 +64,31 @@ export function RoomManager({ onRoomJoined }: RoomManagerProps) {
 
     setIsCreating(true)
     try {
-      const sessionId = generateSessionId()
+      // Verificar se já existe sessão
+      let existingSession = getUserSession()
+      let sessionId: string
+      let playerId: number
+
+      if (existingSession) {
+        sessionId = existingSession.sessionId
+        playerId = existingSession.playerId
+      } else {
+        sessionId = generateSessionId()
+        const player = await createPlayer(playerName, sessionId)
+        playerId = player.id
+      }
+
       const room = await createGameRoom(roomName, sessionId)
       
-      // Criar jogador
-      const player = await createPlayer(playerName, sessionId)
+      // Salvar sessão
+      saveUserSession({
+        playerId,
+        playerName,
+        sessionId,
+        roomCode: room.room_code,
+        isHost: true,
+        createdAt: Date.now()
+      })
       
       toast.success(`Sala "${room.room_code}" criada com sucesso!`)
       onRoomJoined(room.room_code, playerName, true)
@@ -74,10 +124,31 @@ export function RoomManager({ onRoomJoined }: RoomManagerProps) {
         return
       }
 
-      const sessionId = generateSessionId()
-      const player = await createPlayer(playerName, sessionId)
+      // Verificar se já existe sessão
+      let existingSession = getUserSession()
+      let sessionId: string
+      let playerId: number
+
+      if (existingSession) {
+        sessionId = existingSession.sessionId
+        playerId = existingSession.playerId
+      } else {
+        sessionId = generateSessionId()
+        const player = await createPlayer(playerName, sessionId)
+        playerId = player.id
+      }
       
       await joinGameRoom(roomCode.toUpperCase())
+      
+      // Salvar sessão
+      saveUserSession({
+        playerId,
+        playerName,
+        sessionId,
+        roomCode: roomCode.toUpperCase(),
+        isHost: false,
+        createdAt: Date.now()
+      })
       
       toast.success(`Entrou na sala "${roomCode.toUpperCase()}"!`)
       onRoomJoined(roomCode.toUpperCase(), playerName, false)
@@ -100,7 +171,7 @@ export function RoomManager({ onRoomJoined }: RoomManagerProps) {
       <div className="max-w-2xl mx-auto pt-20">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-foreground mb-2">
-            🎯 Stop Game
+            Stop Game
           </h1>
           <p className="text-muted-foreground text-lg">
             Crie ou entre em uma sala para começar a jogar

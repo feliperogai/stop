@@ -1,6 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
+
+// Desabilitar pré-renderização estática
+export const dynamic = 'force-dynamic'
 import { RoomManager } from "@/components/room-manager"
 import { GameLobby } from "@/components/game-lobby"
 import { LiveGame } from "@/components/live-game"
@@ -10,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { History, Trophy, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { cleanupExpiredData } from "@/lib/api-client"
+import { getUserSession, clearUserSession } from "@/lib/session"
 
 type GamePhase = 'room-selection' | 'lobby' | 'playing' | 'evaluation' | 'finished'
 
@@ -28,34 +32,35 @@ export default function StopGame() {
   const [gamePhase, setGamePhase] = useState<GamePhase>('room-selection')
   const [gameSession, setGameSession] = useState<GameSession | null>(null)
 
-  // Limpeza automática de dados expirados
-  useEffect(() => {
-    const cleanup = async () => {
-      try {
-        await cleanupExpiredData()
-      } catch (error) {
-        console.error("Erro na limpeza automática:", error)
-      }
-    }
-    
-    cleanup()
-    const interval = setInterval(cleanup, 5 * 60 * 1000) // A cada 5 minutos
-    return () => clearInterval(interval)
-  }, [])
+
 
   const handleRoomJoined = (roomCode: string, playerName: string, isHost: boolean) => {
-    // Aqui você criaria o jogador e obteria o ID
-    const playerId = Math.floor(Math.random() * 1000000) // Simulação
-    setGameSession({
-      roomCode,
-      playerName,
-      playerId,
-      gameId: 0, // Será definido quando a partida começar
-      isHost,
-      currentRound: 1,
-      currentLetter: '',
-      roundId: 0
-    })
+    const session = getUserSession()
+    if (session) {
+      setGameSession({
+        roomCode,
+        playerName,
+        playerId: session.playerId,
+        gameId: session.gameId || 0,
+        isHost,
+        currentRound: 1,
+        currentLetter: '',
+        roundId: 0
+      })
+    } else {
+      // Fallback se não houver sessão
+      const playerId = Math.floor(Math.random() * 1000000)
+      setGameSession({
+        roomCode,
+        playerName,
+        playerId,
+        gameId: 0,
+        isHost,
+        currentRound: 1,
+        currentLetter: '',
+        roundId: 0
+      })
+    }
     setGamePhase('lobby')
   }
 
@@ -94,6 +99,7 @@ export default function StopGame() {
   }
 
   const handleBackToRoomSelection = () => {
+    clearUserSession()
     setGamePhase('room-selection')
     setGameSession(null)
   }
@@ -171,7 +177,7 @@ export default function StopGame() {
             <Card className="game-card">
               <CardHeader>
                 <CardTitle className="text-center text-3xl">
-                  🎉 Partida Finalizada!
+                  Partida Finalizada!
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-6">

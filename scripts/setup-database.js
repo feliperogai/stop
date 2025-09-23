@@ -14,7 +14,7 @@ async function setupDatabase() {
   const client = await pool.connect()
   
   try {
-    console.log('🔧 Configurando banco de dados...')
+    console.log('Configurando banco de dados...')
     
     // Ler o arquivo SQL
     const sqlPath = path.join(__dirname, 'create-database-schema.sql')
@@ -23,8 +23,8 @@ async function setupDatabase() {
     // Executar o script SQL
     await client.query(sql)
     
-    console.log('✅ Banco de dados configurado com sucesso!')
-    console.log('📊 Tabelas criadas:')
+    console.log('Banco de dados configurado com sucesso!')
+    console.log('Tabelas criadas:')
     console.log('   - players (jogadores temporários)')
     console.log('   - game_rooms (salas de jogo)')
     console.log('   - games (partidas temporárias)')
@@ -37,12 +37,12 @@ async function setupDatabase() {
     console.log('   - round_scores (pontuações)')
     console.log('   - game_history (histórico temporário)')
     console.log('')
-    console.log('🧹 Funções de limpeza automática criadas')
-    console.log('📈 Índices de performance criados')
-    console.log('🎯 Categorias padrão inseridas')
+    console.log('Funções de limpeza automática criadas')
+    console.log('Índices de performance criados')
+    console.log('Categorias padrão inseridas')
     
   } catch (error) {
-    console.error('❌ Erro ao configurar banco de dados:', error)
+    console.error('Erro ao configurar banco de dados:', error)
     process.exit(1)
   } finally {
     client.release()
