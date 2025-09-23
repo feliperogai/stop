@@ -31,6 +31,8 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
   const [copied, setCopied] = useState(false)
   const [gameId, setGameId] = useState<number | null>(null)
 
+  console.log("GameLobby props:", { roomCode, playerName, isHost })
+
   const fetchRoomData = async () => {
     try {
       const roomData = await getGameRoom(roomCode)
@@ -62,17 +64,36 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
   }, [roomCode])
 
   const handleToggleReady = async () => {
-    if (!room) return
+    console.log("handleToggleReady chamado")
+    console.log("room:", room)
+    console.log("participants:", participants)
+    console.log("playerName:", playerName)
+    
+    if (!room) {
+      console.log("Sala não encontrada")
+      return
+    }
     
     const session = getUserSession()
-    if (!session) return
+    console.log("session:", session)
+    if (!session) {
+      console.log("Sessão não encontrada")
+      return
+    }
     
     const currentParticipant = participants.find(p => p.player_name === playerName)
-    if (!currentParticipant) return
+    console.log("currentParticipant:", currentParticipant)
+    if (!currentParticipant) {
+      console.log("Participante atual não encontrado")
+      return
+    }
     
     try {
       const newReadyStatus = !currentParticipant.is_ready
-      await updateRoomParticipantReady(room.id, session.playerId, newReadyStatus)
+      console.log("Novo status de pronto:", newReadyStatus)
+      
+      const result = await updateRoomParticipantReady(room.id, session.playerId, newReadyStatus)
+      console.log("Resultado da API:", result)
       
       // Atualizar estado local
       setParticipants(prev => 
@@ -314,28 +335,22 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
                     <p className="text-sm text-muted-foreground mb-4">
                       Marque-se como pronto quando estiver preparado para começar a partida.
                     </p>
+                    <p className="text-xs text-red-500 mb-2">
+                      Debug: isHost = {isHost.toString()}, playerName = {playerName}
+                    </p>
                   </div>
                   
                   <Button
-                    onClick={handleToggleReady}
-                    className={`px-8 py-3 text-lg ${
-                      participants.find(p => p.player_name === playerName)?.is_ready
-                        ? "bg-green-500 hover:bg-green-600 text-white"
-                        : "bg-[var(--game-teal)] hover:bg-[var(--game-teal)]/80 text-white"
-                    }`}
+                    onClick={() => {
+                      console.log("Botão clicado!")
+                      alert("Botão funcionando!")
+                      handleToggleReady()
+                    }}
+                    className="px-8 py-3 text-lg bg-blue-500 hover:bg-blue-600 text-white"
                     size="lg"
                   >
-                    {participants.find(p => p.player_name === playerName)?.is_ready ? (
-                      <>
-                        <Check className="w-5 h-5 mr-2" />
-                        Pronto!
-                      </>
-                    ) : (
-                      <>
-                        <Users className="w-5 h-5 mr-2" />
-                        Marcar como Pronto
-                      </>
-                    )}
+                    <Users className="w-5 h-5 mr-2" />
+                    TESTE - Marcar como Pronto
                   </Button>
                 </>
               )}
