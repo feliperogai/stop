@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS games (
     expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '2 hours') -- Auto-expira em 2 horas
 );
 
+-- Tabela de participantes da sala (antes da partida)
+CREATE TABLE IF NOT EXISTS room_participants (
+    id SERIAL PRIMARY KEY,
+    room_id INTEGER REFERENCES game_rooms(id) ON DELETE CASCADE,
+    player_id INTEGER REFERENCES players(id) ON DELETE CASCADE,
+    player_name VARCHAR(100) NOT NULL,
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(room_id, player_id)
+);
+
 -- Tabela de participantes da partida
 CREATE TABLE IF NOT EXISTS game_participants (
     id SERIAL PRIMARY KEY,

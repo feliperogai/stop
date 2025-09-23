@@ -52,8 +52,8 @@ export async function getGameRoom(roomCode: string) {
   return result.success ? result.data : null
 }
 
-export async function joinGameRoom(roomCode: string) {
-  const result = await apiCall('joinGameRoom', { roomCode })
+export async function joinGameRoom(roomCode: string, playerId: number, playerName: string) {
+  const result = await apiCall('joinGameRoom', { roomCode, playerId, playerName })
   return result.success ? result.data : null
 }
 
@@ -82,6 +82,17 @@ export async function addGameParticipant(gameId: number, playerId: number, playe
 export async function getGameParticipants(gameId: number) {
   const result = await apiCall('getGameParticipants', { gameId })
   return result.success ? result.data : []
+}
+
+// Funções de Room Participants
+export async function getRoomParticipants(roomId: number) {
+  const result = await apiCall('getRoomParticipants', { roomId })
+  return result.success ? result.data : []
+}
+
+export async function addRoomParticipant(roomId: number, playerId: number, playerName: string) {
+  const result = await apiCall('addRoomParticipant', { roomId, playerId, playerName })
+  return result.success ? result.data : null
 }
 
 export async function updatePlayerStopStatus(gameId: number, playerId: number, hasStopped: boolean) {

@@ -56,11 +56,23 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, data: getRoomResult.rows[0] || null })
 
       case 'joinGameRoom':
+        // Primeiro, adicionar o jogador à sala
         const joinResult = await query(
           'UPDATE game_rooms SET current_players = current_players + 1 WHERE room_code = $1 AND current_players < max_players RETURNING *',
           [params.roomCode]
         )
-        return NextResponse.json({ success: true, data: joinResult.rows[0] || null })
+        
+        if (joinResult.rows.length === 0) {
+          return NextResponse.json({ success: false, error: 'Sala cheia ou não encontrada' })
+        }
+        
+        // Adicionar o jogador à lista de participantes da sala
+        await query(
+          'INSERT INTO room_participants (room_id, player_id, player_name, joined_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP) ON CONFLICT (room_id, player_id) DO NOTHING',
+          [joinResult.rows[0].id, params.playerId, params.playerName]
+        )
+        
+        return NextResponse.json({ success: true, data: joinResult.rows[0] })
 
       case 'createGame':
         const gameResult = await query(
@@ -99,6 +111,20 @@ export async function POST(request: NextRequest) {
       case 'getGameParticipants':
         const participantsResult = await query('SELECT * FROM game_participants WHERE game_id = $1 ORDER BY joined_at', [params.gameId])
         return NextResponse.json({ success: true, data: participantsResult.rows })
+
+      case 'getRoomParticipants':
+        const roomParticipantsResult = await query(
+          'SELECT * FROM room_participants WHERE room_id = $1 ORDER BY joined_at',
+          [params.roomId]
+        )
+        return NextResponse.json({ success: true, data: roomParticipantsResult.rows })
+
+      case 'addRoomParticipant':
+        const addRoomParticipantResult = await query(
+          'INSERT INTO room_participants (room_id, player_id, player_name, joined_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP) ON CONFLICT (room_id, player_id) DO NOTHING RETURNING *',
+          [params.roomId, params.playerId, params.playerName]
+        )
+        return NextResponse.json({ success: true, data: addRoomParticipantResult.rows[0] })
 
       case 'updatePlayerStopStatus':
         await query(

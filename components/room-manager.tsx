@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Users, Plus, ArrowRight, Copy, Check } from "lucide-react"
-import { createGameRoom, joinGameRoom, getGameRoom, createPlayer, getPlayerBySessionId } from "@/lib/api-client"
+import { createGameRoom, joinGameRoom, getGameRoom, createPlayer, getPlayerBySessionId, addRoomParticipant } from "@/lib/api-client"
 import { saveUserSession, getUserSession, generateSessionId, updateUserSession, clearUserSession } from "@/lib/session"
 import { toast } from "sonner"
 
@@ -80,6 +80,9 @@ export function RoomManager({ onRoomJoined }: RoomManagerProps) {
 
       const room = await createGameRoom(roomName, sessionId)
       
+      // Adicionar o criador da sala como participante
+      await addRoomParticipant(room.id, playerId, playerName)
+      
       // Salvar sessão
       saveUserSession({
         playerId,
@@ -138,7 +141,7 @@ export function RoomManager({ onRoomJoined }: RoomManagerProps) {
         playerId = player.id
       }
       
-      await joinGameRoom(roomCode.toUpperCase())
+      await joinGameRoom(roomCode.toUpperCase(), playerId, playerName)
       
       // Salvar sessão
       saveUserSession({

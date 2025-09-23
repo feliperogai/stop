@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Users, Play, Copy, Check, RefreshCw } from "lucide-react"
-import { getGameRoom, getGameParticipants, createGame, addGameParticipant } from "@/lib/api-client"
+import { getGameRoom, getGameParticipants, createGame, addGameParticipant, getRoomParticipants } from "@/lib/api-client"
 import { getUserSession, updateUserSession, clearUserSession } from "@/lib/session"
 import { toast } from "sonner"
 
@@ -36,29 +36,17 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
       if (roomData) {
         setRoom(roomData)
         
-        // Buscar participantes da sala (mesmo sem partida iniciada)
-        const participantsData = await getGameParticipants(gameId || 0)
+        // Buscar participantes da sala (antes da partida)
+        const participantsData = await getRoomParticipants(roomData.id)
         
-        // Adicionar o jogador atual se não estiver na lista
-        const currentPlayerExists = participantsData.some(p => p.player_name === playerName)
-        if (!currentPlayerExists && gameId) {
-          // Adicionar jogador atual à lista
-          const session = getUserSession()
-          if (session) {
-            const newParticipant = {
-              id: session.playerId,
-              player_name: playerName,
-              total_score: 0,
-              has_stopped: false,
-              joined_at: new Date().toISOString()
-            }
-            setParticipants([...participantsData, newParticipant])
-          } else {
-            setParticipants(participantsData)
-          }
-        } else {
-          setParticipants(participantsData)
-        }
+        // Converter para o formato esperado
+        const formattedParticipants = participantsData.map(p => ({
+          id: p.player_id,
+          player_name: p.player_name,
+          joined_at: p.joined_at
+        }))
+        
+        setParticipants(formattedParticipants)
       }
     } catch (error) {
       console.error("Erro ao buscar dados da sala:", error)
@@ -69,7 +57,7 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
     fetchRoomData()
     const interval = setInterval(fetchRoomData, 2000) // Atualiza a cada 2 segundos
     return () => clearInterval(interval)
-  }, [roomCode, gameId])
+  }, [roomCode])
 
   const handleStartGame = async () => {
     if (!room || participants.length < 2) {
