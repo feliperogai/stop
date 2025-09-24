@@ -295,15 +295,44 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
         <Card className="game-card">
           <CardContent className="pt-6">
             <div className="text-center space-y-4">
-              {isHost ? (
+              <div>
+                <h3 className="text-lg font-semibold mb-2">
+                  {isHost ? "Controles do Host" : "Status de Pronto"}
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {isHost 
+                    ? "Marque-se como pronto e inicie a partida quando todos estiverem prontos."
+                    : "Marque-se como pronto quando estiver preparado para começar a partida."
+                  }
+                </p>
+              </div>
+              
+              {/* Botão de Marcar como Pronto - para todos */}
+              <Button
+                onClick={handleToggleReady}
+                className={`px-8 py-3 text-lg ${
+                  participants.find(p => p.player_name === playerName)?.is_ready
+                    ? "bg-green-500 hover:bg-green-600 text-white"
+                    : "bg-[var(--game-teal)] hover:bg-[var(--game-teal)]/80 text-white"
+                }`}
+                size="lg"
+              >
+                {participants.find(p => p.player_name === playerName)?.is_ready ? (
+                  <>
+                    <Check className="w-5 h-5 mr-2" />
+                    Pronto!
+                  </>
+                ) : (
+                  <>
+                    <Users className="w-5 h-5 mr-2" />
+                    Marcar como Pronto
+                  </>
+                )}
+              </Button>
+
+              {/* Botão de Iniciar Partida - apenas para host */}
+              {isHost && (
                 <>
-                  <div>
-                    <h3 className="text-lg font-semibold mb-2">Controles do Host</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Você é o host desta sala. Você pode iniciar a partida quando todos estiverem prontos.
-                    </p>
-                  </div>
-                  
                   <Button
                     onClick={handleStartGame}
                     disabled={isStarting || participants.length < 2 || !participants.every(p => p.is_ready)}
@@ -334,37 +363,6 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
                       Aguardando todos os jogadores ficarem prontos
                     </p>
                   )}
-                </>
-              ) : (
-                <>
-                  <div>
-                    <h3 className="text-lg font-semibold mb-2">Status de Pronto</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Marque-se como pronto quando estiver preparado para começar a partida.
-                    </p>
-                  </div>
-                  
-                  <Button
-                    onClick={handleToggleReady}
-                    className={`px-8 py-3 text-lg ${
-                      participants.find(p => p.player_name === playerName)?.is_ready
-                        ? "bg-green-500 hover:bg-green-600 text-white"
-                        : "bg-[var(--game-teal)] hover:bg-[var(--game-teal)]/80 text-white"
-                    }`}
-                    size="lg"
-                  >
-                    {participants.find(p => p.player_name === playerName)?.is_ready ? (
-                      <>
-                        <Check className="w-5 h-5 mr-2" />
-                        Pronto!
-                      </>
-                    ) : (
-                      <>
-                        <Users className="w-5 h-5 mr-2" />
-                        Marcar como Pronto
-                      </>
-                    )}
-                  </Button>
                 </>
               )}
             </div>
