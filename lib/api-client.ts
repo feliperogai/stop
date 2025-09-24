@@ -100,6 +100,11 @@ export async function updateRoomParticipantReady(roomId: number, playerId: numbe
   return result.success ? result.data : null
 }
 
+export async function removeRoomParticipant(roomId: number, playerId: number) {
+  const result = await apiCall('removeRoomParticipant', { roomId, playerId })
+  return result.success
+}
+
 export async function updatePlayerStopStatus(gameId: number, playerId: number, hasStopped: boolean) {
   const result = await apiCall('updatePlayerStopStatus', { gameId, playerId, hasStopped })
   return result.success

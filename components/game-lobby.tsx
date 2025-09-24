@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Users, Play, Copy, Check, RefreshCw } from "lucide-react"
-import { getGameRoom, getGameParticipants, createGame, addGameParticipant, getRoomParticipants, updateRoomParticipantReady } from "@/lib/api-client"
+import { Users, Play, Copy, Check, RefreshCw, X } from "lucide-react"
+import { getGameRoom, getGameParticipants, createGame, addGameParticipant, getRoomParticipants, updateRoomParticipantReady, removeRoomParticipant } from "@/lib/api-client"
 import { getUserSession, updateUserSession, clearUserSession } from "@/lib/session"
 import { toast } from "sonner"
 
@@ -30,8 +30,6 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
   const [isStarting, setIsStarting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [gameId, setGameId] = useState<number | null>(null)
-
-  console.log("GameLobby props:", { roomCode, playerName, isHost })
 
   const fetchRoomData = async () => {
     try {
@@ -64,36 +62,20 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
   }, [roomCode])
 
   const handleToggleReady = async () => {
-    console.log("handleToggleReady chamado")
-    console.log("room:", room)
-    console.log("participants:", participants)
-    console.log("playerName:", playerName)
-    
-    if (!room) {
-      console.log("Sala não encontrada")
-      return
-    }
+    if (!room) return
     
     const session = getUserSession()
-    console.log("session:", session)
-    if (!session) {
-      console.log("Sessão não encontrada")
-      return
-    }
+    if (!session) return
     
     const currentParticipant = participants.find(p => p.player_name === playerName)
-    console.log("currentParticipant:", currentParticipant)
     if (!currentParticipant) {
-      console.log("Participante atual não encontrado")
+      toast.error("Participante não encontrado. Recarregue a página.")
       return
     }
     
     try {
       const newReadyStatus = !currentParticipant.is_ready
-      console.log("Novo status de pronto:", newReadyStatus)
-      
-      const result = await updateRoomParticipantReady(room.id, session.playerId, newReadyStatus)
-      console.log("Resultado da API:", result)
+      await updateRoomParticipantReady(room.id, session.playerId, newReadyStatus)
       
       // Atualizar estado local
       setParticipants(prev => 
@@ -151,6 +133,21 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
     }
   }
 
+  const handleRemoveParticipant = async (participantId: number, participantName: string) => {
+    if (!room || !isHost) return
+    
+    try {
+      await removeRoomParticipant(room.id, participantId)
+      
+      // Atualizar estado local
+      setParticipants(prev => prev.filter(p => p.id !== participantId))
+      
+      toast.success(`${participantName} foi removido da sala`)
+    } catch (error) {
+      console.error("Erro ao remover participante:", error)
+      toast.error("Erro ao remover participante. Tente novamente.")
+    }
+  }
 
   const copyRoomCode = () => {
     navigator.clipboard.writeText(roomCode)
@@ -276,6 +273,16 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
                           Host
                         </Badge>
                       )}
+                      {isHost && participant.player_name !== playerName && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveParticipant(participant.id, participant.player_name)}
+                          className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -335,22 +342,28 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
                     <p className="text-sm text-muted-foreground mb-4">
                       Marque-se como pronto quando estiver preparado para começar a partida.
                     </p>
-                    <p className="text-xs text-red-500 mb-2">
-                      Debug: isHost = {isHost.toString()}, playerName = {playerName}
-                    </p>
                   </div>
                   
                   <Button
-                    onClick={() => {
-                      console.log("Botão clicado!")
-                      alert("Botão funcionando!")
-                      handleToggleReady()
-                    }}
-                    className="px-8 py-3 text-lg bg-blue-500 hover:bg-blue-600 text-white"
+                    onClick={handleToggleReady}
+                    className={`px-8 py-3 text-lg ${
+                      participants.find(p => p.player_name === playerName)?.is_ready
+                        ? "bg-green-500 hover:bg-green-600 text-white"
+                        : "bg-[var(--game-teal)] hover:bg-[var(--game-teal)]/80 text-white"
+                    }`}
                     size="lg"
                   >
-                    <Users className="w-5 h-5 mr-2" />
-                    TESTE - Marcar como Pronto
+                    {participants.find(p => p.player_name === playerName)?.is_ready ? (
+                      <>
+                        <Check className="w-5 h-5 mr-2" />
+                        Pronto!
+                      </>
+                    ) : (
+                      <>
+                        <Users className="w-5 h-5 mr-2" />
+                        Marcar como Pronto
+                      </>
+                    )}
                   </Button>
                 </>
               )}

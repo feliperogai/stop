@@ -133,6 +133,21 @@ export async function POST(request: NextRequest) {
         )
         return NextResponse.json({ success: true, data: updateReadyResult.rows[0] })
 
+      case 'removeRoomParticipant':
+        // Primeiro, remover o participante da tabela room_participants
+        await query(
+          'DELETE FROM room_participants WHERE room_id = $1 AND player_id = $2',
+          [params.roomId, params.playerId]
+        )
+        
+        // Depois, decrementar o contador de jogadores na sala
+        await query(
+          'UPDATE game_rooms SET current_players = current_players - 1 WHERE id = $1 AND current_players > 0',
+          [params.roomId]
+        )
+        
+        return NextResponse.json({ success: true })
+
       case 'updatePlayerStopStatus':
         await query(
           'UPDATE game_participants SET has_stopped = $1, stopped_at = $2 WHERE game_id = $3 AND player_id = $4',
