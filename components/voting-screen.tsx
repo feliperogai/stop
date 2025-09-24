@@ -48,6 +48,7 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
   const [playersReady, setPlayersReady] = useState<any[]>([])
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [isReadyForNext, setIsReadyForNext] = useState(false)
+  const [duplicateAnswers, setDuplicateAnswers] = useState<{ [answerId: number]: boolean }>({})
 
   useEffect(() => {
     const session = getUserSession()
@@ -322,6 +323,41 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
     }
   }
 
+  const handleMarkDuplicate = async (answerId: number) => {
+    if (!currentPlayerId) return
+    
+    console.log("Marcando resposta como duplicada:", { answerId, playerId: currentPlayerId })
+    
+    try {
+      setVoting(true)
+      await markAnswerAsDuplicate(answerId, currentPlayerId)
+      
+      // Atualizar estado local
+      setDuplicateAnswers(prev => ({
+        ...prev,
+        [answerId]: true
+      }))
+      
+      // Atualizar respostas locais para mostrar que é duplicada
+      setCurrentAnswers(prev => 
+        prev.map(answer => 
+          answer.id === answerId 
+            ? { ...answer, is_duplicate: true }
+            : answer
+        )
+      )
+      
+      console.log("Resposta marcada como duplicada com sucesso")
+      toast.success("Resposta marcada como duplicada (5 pontos)")
+      
+    } catch (error) {
+      console.error("Erro ao marcar como duplicada:", error)
+      toast.error("Erro ao marcar resposta como duplicada")
+    } finally {
+      setVoting(false)
+    }
+  }
+
   const handleNextCategory = async () => {
     if (!currentPlayerId) return
     
@@ -529,6 +565,11 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
                             }`}>
                               {answer.answer}
                             </p>
+                            {answer.is_duplicate && (
+                              <div className="text-sm text-orange-600 font-medium flex items-center gap-1">
+                                📋 Marcada como duplicada (5 pontos)
+                              </div>
+                            )}
                           </div>
                         </div>
                         
@@ -561,6 +602,48 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
                               Inválido
                             </Badge>
                           )}
+                          
+                          {/* Botões de ação */}
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleVote(answer.id, true)
+                              }}
+                              className="bg-green-50 border-green-300 text-green-700 hover:bg-green-100"
+                              disabled={voting}
+                            >
+                              ✓ Válida
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleVote(answer.id, false)
+                              }}
+                              className="bg-red-50 border-red-300 text-red-700 hover:bg-red-100"
+                              disabled={voting}
+                            >
+                              ✗ Inválida
+                            </Button>
+                            {!answer.is_duplicate && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleMarkDuplicate(answer.id)
+                                }}
+                                className="bg-orange-50 border-orange-300 text-orange-700 hover:bg-orange-100"
+                                disabled={voting}
+                              >
+                                📋 Igual
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </CardContent>

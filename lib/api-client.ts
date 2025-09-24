@@ -111,8 +111,8 @@ export async function updatePlayerStopStatus(gameId: number, playerId: number, h
 }
 
 // Funções de Round
-export async function createRound(gameId: number, roundNumber: number, letter: string) {
-  const result = await apiCall('createRound', { gameId, roundNumber, letter })
+export async function createRound(gameId: number, roundNumber: number) {
+  const result = await apiCall('createRound', { gameId, roundNumber })
   return result.success ? result.data : null
 }
 
@@ -236,4 +236,24 @@ export async function markPlayerReadyForNextCategory(gameId: number, playerId: n
 export async function getPlayersReadyForCategory(gameId: number, categoryIndex: number) {
   const result = await apiCall('getPlayersReadyForCategory', { gameId, categoryIndex })
   return result.success ? result.data : []
+}
+
+export async function updateRoomStatus(roomCode: string, status: string) {
+  const result = await apiCall('updateRoomStatus', { roomCode, status })
+  return result.success
+}
+
+export async function finalizeGame(gameId: number) {
+  const result = await apiCall('finalizeGame', { gameId })
+  return result.success ? result.data : null
+}
+
+export async function getGameResults(gameId: number) {
+  const result = await apiCall('getGameResults', { gameId })
+  return result.success ? result.data : []
+}
+
+export async function markAnswerAsDuplicate(answerId: number, playerId: number) {
+  const result = await apiCall('markAnswerAsDuplicate', { answerId, playerId })
+  return result.success
 }

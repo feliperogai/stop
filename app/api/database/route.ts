@@ -477,9 +477,39 @@ export async function POST(request: NextRequest) {
         
         const { votes_for, votes_against } = voteCounts.rows[0]
         
+        // Calcular pontuação baseada nas regras
+        let points = 0
+        const isValid = votes_for > votes_against
+        
+        if (isValid) {
+          // Verificar se é duplicada
+          const answerData = await query('SELECT is_duplicate FROM player_answers WHERE id = $1', [params.answerId])
+          const isDuplicate = answerData.rows[0]?.is_duplicate || false
+          
+          if (isDuplicate) {
+            points = 5 // Resposta duplicada válida
+          } else {
+            // Verificar se é única na categoria
+            const categoryData = await query(`
+              SELECT COUNT(*) as total_answers
+              FROM player_answers pa
+              WHERE pa.category_id = (SELECT category_id FROM player_answers WHERE id = $1)
+                AND pa.round_id = (SELECT round_id FROM player_answers WHERE id = $1)
+                AND pa.is_valid = true
+            `, [params.answerId])
+            
+            const totalAnswers = parseInt(categoryData.rows[0].total_answers)
+            if (totalAnswers === 1) {
+              points = 20 // Resposta única válida
+            } else {
+              points = 10 // Resposta normal válida
+            }
+          }
+        }
+        
         await query(
-          'UPDATE player_answers SET votes_for = $1, votes_against = $2 WHERE id = $3',
-          [votes_for, votes_against, params.answerId]
+          'UPDATE player_answers SET votes_for = $1, votes_against = $2, is_valid = $3, points = $4 WHERE id = $5',
+          [votes_for, votes_against, isValid, points, params.answerId]
         )
         
         // Verificar se todos votaram nesta resposta
@@ -496,10 +526,10 @@ export async function POST(request: NextRequest) {
         
         if (parseInt(totalVotes.rows[0].total) >= parseInt(totalPlayers.rows[0].total)) {
           // Todos votaram, determinar resultado final
-          const isValid = votes_for > votes_against
+          const finalIsValid = votes_for > votes_against
           await query(
             'UPDATE player_answers SET is_valid = $1 WHERE id = $2',
-            [isValid, params.answerId]
+            [finalIsValid, params.answerId]
           )
         }
         
@@ -568,6 +598,100 @@ export async function POST(request: NextRequest) {
         console.log('Jogadores encontrados:', readyPlayersResult.rows)
         
         return NextResponse.json({ success: true, data: readyPlayersResult.rows })
+
+      case 'createRound':
+        console.log('Criando nova rodada:', { gameId: params.gameId, roundNumber: params.roundNumber })
+        
+        // Gerar letra aleatória
+        const newLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        const newRandomLetter = newLetters[Math.floor(Math.random() * newLetters.length)]
+        
+        const newRoundResult = await query(`
+          INSERT INTO rounds (game_id, round_number, letter, status) 
+          VALUES ($1, $2, $3, 'waiting') 
+          RETURNING *
+        `, [params.gameId, params.roundNumber, newRandomLetter])
+        
+        console.log('Nova rodada criada:', newRoundResult.rows[0])
+        return NextResponse.json({ success: true, data: newRoundResult.rows[0] })
+
+      case 'updateGameStatus':
+        console.log('Atualizando status do jogo:', { gameId: params.gameId, status: params.status })
+        await query('UPDATE games SET status = $1 WHERE id = $2', [params.status, params.gameId])
+        return NextResponse.json({ success: true })
+
+      case 'updateRoomStatus':
+        console.log('Atualizando status da sala:', { roomCode: params.roomCode, status: params.status })
+        await query('UPDATE game_rooms SET status = $1 WHERE room_code = $2', [params.status, params.roomCode])
+        return NextResponse.json({ success: true })
+
+      case 'finalizeGame':
+        console.log('Finalizando jogo:', { gameId: params.gameId })
+        
+        // Atualizar status do jogo para 'finished'
+        await query('UPDATE games SET status = $1 WHERE id = $2', ['finished', params.gameId])
+        
+        // Atualizar status da sala para 'finished'
+        await query('UPDATE game_rooms SET status = $1 WHERE id = (SELECT room_id FROM games WHERE id = $2)', ['finished', params.gameId])
+        
+        // Calcular pontuação final
+        const finalScoresResult = await query(`
+          SELECT 
+            gp.player_id,
+            gp.player_name,
+            COALESCE(SUM(pa.points), 0) as total_points
+          FROM game_participants gp
+          LEFT JOIN player_answers pa ON gp.player_id = pa.player_id 
+            AND pa.round_id IN (SELECT id FROM rounds WHERE game_id = $1)
+          WHERE gp.game_id = $1
+          GROUP BY gp.player_id, gp.player_name
+          ORDER BY total_points DESC
+        `, [params.gameId])
+        
+        console.log('Pontuação final:', finalScoresResult.rows)
+        return NextResponse.json({ success: true, data: finalScoresResult.rows })
+
+      case 'getGameResults':
+        console.log('Buscando resultados do jogo:', { gameId: params.gameId })
+        
+        const gameResultsResult = await query(`
+          SELECT 
+            gp.player_id,
+            gp.player_name,
+            COALESCE(SUM(pa.points), 0) as total_points,
+            COUNT(pa.id) as total_answers,
+            COUNT(CASE WHEN pa.is_valid = true THEN 1 END) as valid_answers,
+            COUNT(CASE WHEN pa.is_valid = false THEN 1 END) as invalid_answers
+          FROM game_participants gp
+          LEFT JOIN player_answers pa ON gp.player_id = pa.player_id 
+            AND pa.round_id IN (SELECT id FROM rounds WHERE game_id = $1)
+          WHERE gp.game_id = $1
+          GROUP BY gp.player_id, gp.player_name
+          ORDER BY total_points DESC
+        `, [params.gameId])
+        
+        console.log('Resultados do jogo:', gameResultsResult.rows)
+        return NextResponse.json({ success: true, data: gameResultsResult.rows })
+
+      case 'markAnswerAsDuplicate':
+        console.log('Marcando resposta como duplicada:', { answerId: params.answerId, playerId: params.playerId })
+        
+        // Marcar resposta como duplicada
+        await query('UPDATE player_answers SET is_duplicate = true WHERE id = $1', [params.answerId])
+        
+        // Recalcular pontuação baseada nas regras
+        const answerData = await query('SELECT is_valid FROM player_answers WHERE id = $1', [params.answerId])
+        const answerIsValid = answerData.rows[0]?.is_valid || false
+        
+        let duplicatePoints = 0
+        if (answerIsValid) {
+          duplicatePoints = 5 // Resposta duplicada válida
+        }
+        
+        await query('UPDATE player_answers SET points = $1 WHERE id = $2', [duplicatePoints, params.answerId])
+        
+        console.log('Resposta marcada como duplicada com sucesso, pontos:', duplicatePoints)
+        return NextResponse.json({ success: true })
 
       default:
         return NextResponse.json({ success: false, error: 'Ação não encontrada' }, { status: 400 })

@@ -34,6 +34,7 @@ import {
 } from "@/lib/api-client"
 import { toast } from "sonner"
 import VotingScreen from "./voting-screen"
+import GameResults from "./game-results"
 
 interface LiveGameProps {
   gameId: number
@@ -74,6 +75,7 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
   const [isLoading, setIsLoading] = useState(true)
   const [showVoting, setShowVoting] = useState(false)
   const [stoppingGame, setStoppingGame] = useState(false)
+  const [showResults, setShowResults] = useState(false)
 
   const fetchGameData = async () => {
     try {
@@ -208,10 +210,57 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
     }
   }
 
-  const handleVotingComplete = () => {
-    setShowVoting(false)
-    // Aqui você pode navegar para a próxima rodada ou finalizar o jogo
-    toast.success("Votação concluída!")
+  const handleVotingComplete = async () => {
+    console.log("Votação concluída! Verificando se deve avançar para próxima rodada...")
+    
+    try {
+      // Verificar se há mais rodadas para jogar
+      const currentRoundNumber = currentRound?.round_number || 1
+      const maxRounds = 10
+      
+      console.log(`Rodada atual: ${currentRoundNumber} de ${maxRounds}`)
+      
+      if (currentRoundNumber < maxRounds) {
+        console.log(`Avançando para rodada ${currentRoundNumber + 1}...`)
+        
+        // Criar nova rodada
+        const newRound = await createRound(gameId, currentRoundNumber + 1)
+        console.log("Nova rodada criada:", newRound)
+        
+        if (newRound) {
+          // Atualizar status do jogo para 'playing'
+          await updateGameStatus(gameId, 'playing')
+          
+          // Atualizar status da sala para 'playing'
+          await updateRoomStatus(roomCode, 'playing')
+          
+          toast.success(`Rodada ${currentRoundNumber + 1} iniciada!`)
+          
+          // Recarregar dados do jogo
+          setTimeout(() => {
+            fetchGameData()
+          }, 1000)
+        } else {
+          throw new Error("Falha ao criar nova rodada")
+        }
+      } else {
+        console.log("Todas as rodadas foram concluídas! Finalizando jogo...")
+        
+        // Finalizar jogo e calcular pontuação final
+        await finalizeGame(gameId)
+        
+        toast.success("Jogo finalizado! Verificando pontuação...")
+        
+        // Mostrar tela de resultados
+        setTimeout(() => {
+          console.log("Mostrando tela de resultados...")
+          setShowResults(true)
+        }, 2000)
+      }
+    } catch (error) {
+      console.error("Erro ao finalizar votação:", error)
+      toast.error("Erro ao processar votação")
+    }
   }
 
   const getPlayerInitials = (name: string) => {
@@ -248,6 +297,21 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
           </Card>
         </div>
       </div>
+    )
+  }
+
+  // Mostrar tela de resultados se o jogo terminou
+  if (showResults) {
+    console.log("Renderizando tela de resultados para gameId:", gameId)
+    return (
+      <GameResults
+        gameId={gameId}
+        onNewGame={() => {
+          setShowResults(false)
+          // Aqui você pode implementar a lógica para criar um novo jogo
+          window.location.href = '/'
+        }}
+      />
     )
   }
 
@@ -307,6 +371,9 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
                   </Badge>
                   <Badge variant="outline" className="text-lg px-3 py-1">
                     Letra: {currentRound.letter}
+                  </Badge>
+                  <Badge variant="outline" className="text-lg px-3 py-1">
+                    Rodada {currentRound.round_number}/10
                   </Badge>
                 </div>
               </div>
