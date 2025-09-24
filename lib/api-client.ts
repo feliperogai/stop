@@ -132,8 +132,8 @@ export async function getCurrentRound(gameId: number) {
 }
 
 // Funções de Player Answers
-export async function savePlayerAnswer(roundId: number, playerId: number, categoryId: number, answer: string) {
-  const result = await apiCall('savePlayerAnswer', { roundId, playerId, categoryId, answer })
+export async function savePlayerAnswer(roundId: number, playerId: number, playerName: string, categoryId: number, answer: string) {
+  const result = await apiCall('savePlayerAnswer', { roundId, playerId, playerName, categoryId, answer })
   return result.success ? result.data : null
 }
 
@@ -185,4 +185,55 @@ export async function updatePlayerScore(gameId: number, playerId: number, score:
 export async function cleanupExpiredData() {
   const result = await apiCall('cleanupExpiredData')
   return result.success
+}
+
+// Função de teste
+export async function testCategories() {
+  console.log("testCategories chamada")
+  const result = await apiCall('testCategories')
+  console.log("Resultado da API:", result)
+  return result.success ? result.data : []
+}
+
+// Função para limpar categorias duplicadas
+export async function cleanupDuplicateCategories() {
+  const result = await apiCall('cleanupDuplicateCategories')
+  return result.success
+}
+
+// Função para limpeza forçada de categorias
+export async function forceCleanupCategories() {
+  const result = await apiCall('forceCleanupCategories')
+  return result.success
+}
+
+// Funções para sistema de votação
+export async function getPlayerAnswers(roundId: number) {
+  const result = await apiCall('getPlayerAnswers', { roundId })
+  return result.success ? result.data : []
+}
+
+export async function voteOnAnswer(answerId: number, playerId: number, isValid: boolean) {
+  const result = await apiCall('voteOnAnswer', { answerId, playerId, isValid })
+  return result.success
+}
+
+export async function getVotingResults(roundId: number) {
+  const result = await apiCall('getVotingResults', { roundId })
+  return result.success ? result.data : []
+}
+
+export async function stopGameForAll(gameId: number) {
+  const result = await apiCall('stopGameForAll', { gameId })
+  return result.success
+}
+
+export async function markPlayerReadyForNextCategory(gameId: number, playerId: number, categoryIndex: number) {
+  const result = await apiCall('markPlayerReadyForNextCategory', { gameId, playerId, categoryIndex })
+  return result.success
+}
+
+export async function getPlayersReadyForCategory(gameId: number, categoryIndex: number) {
+  const result = await apiCall('getPlayersReadyForCategory', { gameId, categoryIndex })
+  return result.success ? result.data : []
 }

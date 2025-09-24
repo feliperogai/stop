@@ -97,12 +97,25 @@ CREATE TABLE IF NOT EXISTS player_answers (
     id SERIAL PRIMARY KEY,
     round_id INTEGER REFERENCES rounds(id) ON DELETE CASCADE,
     player_id INTEGER REFERENCES players(id) ON DELETE CASCADE,
+    player_name VARCHAR(100) NOT NULL,
     category_id INTEGER REFERENCES categories(id),
     answer TEXT,
-    is_valid BOOLEAN DEFAULT false,
+    votes_for INTEGER DEFAULT 0,
+    votes_against INTEGER DEFAULT 0,
+    is_valid BOOLEAN,
     points INTEGER DEFAULT 0,
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(round_id, player_id, category_id)
+);
+
+-- Tabela de votos nas respostas
+CREATE TABLE IF NOT EXISTS answer_votes (
+    id SERIAL PRIMARY KEY,
+    answer_id INTEGER REFERENCES player_answers(id) ON DELETE CASCADE,
+    player_id INTEGER NOT NULL,
+    is_valid BOOLEAN NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(answer_id, player_id)
 );
 
 -- Tabela de avaliações de respostas pelos jogadores

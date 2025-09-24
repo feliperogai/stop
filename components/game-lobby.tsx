@@ -61,6 +61,48 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
     return () => clearInterval(interval)
   }, [roomCode])
 
+  // Verificar se há uma partida ativa para redirecionar todos os usuários
+  useEffect(() => {
+    const checkForActiveGame = async () => {
+      if (room) {
+        try {
+          // Verificar se há uma partida ativa para esta sala
+          const roomData = await getGameRoom(roomCode)
+          console.log("Verificando sala para redirecionamento:", roomData)
+          
+          console.log("Status da sala:", roomData?.status)
+          console.log("Sala encontrada:", !!roomData)
+          console.log("Game ID da sala:", roomData?.game_id)
+          console.log("Game status da sala:", roomData?.game_status)
+          
+          // Verificar se há uma partida ativa (sala em playing OU scoring)
+          if (roomData && (roomData.status === "playing" || roomData.status === "scoring")) {
+            // Se a sala está em playing ou scoring, redirecionar para o jogo
+            const session = getUserSession()
+            console.log("Sessão do usuário:", session)
+            
+            // Usar gameId da sala se não tiver na sessão
+            const gameIdToUse = session?.gameId || roomData.game_id
+            
+            if (gameIdToUse) {
+              console.log("Redirecionando para o jogo:", gameIdToUse)
+              onGameStart(gameIdToUse)
+            } else {
+              console.log("Usuário não tem gameId na sessão nem na sala")
+            }
+          } else {
+            console.log("Sala não está em playing/scoring ou não encontrada")
+            console.log("Status atual:", roomData?.status)
+          }
+        } catch (error) {
+          console.error("Erro ao verificar partida ativa:", error)
+        }
+      }
+    }
+
+    checkForActiveGame()
+  }, [room, roomCode, onGameStart])
+
   const handleToggleReady = async () => {
     if (!room) return
     
@@ -108,13 +150,23 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
 
     setIsStarting(true)
     try {
+      console.log("Iniciando criação da partida para room:", room.id)
+      
       // Criar a partida
       const game = await createGame(room.id)
+      console.log("Partida criada:", game)
+      
+      if (!game) {
+        throw new Error("Falha ao criar partida")
+      }
+      
       setGameId(game.id)
 
       // Adicionar todos os participantes à partida
+      console.log("Adicionando participantes:", participants)
       for (const participant of participants) {
-        await addGameParticipant(game.id, participant.id, participant.player_name)
+        const result = await addGameParticipant(game.id, participant.id, participant.player_name)
+        console.log(`Participante ${participant.player_name} adicionado:`, result)
       }
 
       // Atualizar status da sala (será implementado na API)
@@ -122,6 +174,7 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
 
       // Salvar gameId na sessão
       updateUserSession({ gameId: game.id })
+      console.log("GameId salvo na sessão:", game.id)
 
       toast.success("Partida iniciada!")
       onGameStart(game.id)
@@ -155,6 +208,8 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
     setTimeout(() => setCopied(false), 2000)
     toast.success("Código da sala copiado!")
   }
+
+
 
   const getPlayerInitials = (name: string) => {
     return name
@@ -329,6 +384,7 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
                   </>
                 )}
               </Button>
+
 
               {/* Botão de Iniciar Partida - apenas para host */}
               {isHost && (

@@ -29,9 +29,11 @@ import {
   endRound,
   createRound,
   startRound,
-  getGameCategories
+  getGameCategories,
+  stopGameForAll
 } from "@/lib/api-client"
 import { toast } from "sonner"
+import VotingScreen from "./voting-screen"
 
 interface LiveGameProps {
   gameId: number
@@ -70,9 +72,13 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
   const [hasStopped, setHasStopped] = useState(false)
   const [gameStats, setGameStats] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [showVoting, setShowVoting] = useState(false)
+  const [stoppingGame, setStoppingGame] = useState(false)
 
   const fetchGameData = async () => {
     try {
+      console.log("Buscando dados do jogo para gameId:", gameId)
+      
       const [gameData, participantsData, categoriesData, currentRoundData, stats] = await Promise.all([
         getGame(gameId),
         getGameParticipants(gameId),
@@ -80,6 +86,14 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
         getCurrentRound(gameId),
         getGameStats(gameId)
       ])
+
+      console.log("Dados recebidos:", {
+        gameData,
+        participantsData,
+        categoriesData,
+        currentRoundData,
+        stats
+      })
 
       setGame(gameData)
       setParticipants(participantsData)
@@ -92,18 +106,53 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
       if (currentParticipant) {
         setHasStopped(currentParticipant.has_stopped)
       }
+      
+      console.log("Status do jogo:", gameData?.status)
+      console.log("Jogador parou:", currentParticipant?.has_stopped)
+      console.log("Categorias carregadas:", categoriesData.length)
+      console.log("Categorias ordenadas:", categoriesData.sort((a, b) => a.position - b.position))
+      console.log("Round atual:", currentRoundData)
+      
+      // Se o jogo está em scoring, ativar tela de votação
+      if (gameData?.status === "scoring") {
+        console.log("Jogo está em scoring, ativando tela de votação")
+        setShowVoting(true)
+      }
 
       // Se há uma rodada em status "waiting", iniciar automaticamente
       if (currentRoundData && currentRoundData.status === 'waiting') {
-        await startRound(currentRoundData.id)
-        // Recarregar dados para pegar a rodada iniciada
-        const updatedRoundData = await getCurrentRound(gameId)
-        setCurrentRound(updatedRoundData)
+        console.log("Iniciando rodada em waiting:", currentRoundData.id)
+        try {
+          await startRound(currentRoundData.id)
+          // Recarregar dados para pegar a rodada iniciada
+          const updatedRoundData = await getCurrentRound(gameId)
+          console.log("Rodada atualizada:", updatedRoundData)
+          setCurrentRound(updatedRoundData)
+          
+          // Atualizar status do jogo também
+          const updatedGameData = await getGame(gameId)
+          console.log("Jogo atualizado:", updatedGameData)
+          setGame(updatedGameData)
+        } catch (error) {
+          console.error("Erro ao iniciar rodada:", error)
+        }
+      }
+
+      // Se o jogo está em status "waiting" mas há uma rodada ativa, atualizar status
+      if (gameData && gameData.status === 'waiting' && currentRoundData && currentRoundData.status === 'playing') {
+        console.log("Jogo deve estar em playing, mas está em waiting. Atualizando...")
+        // Aqui poderíamos atualizar o status do jogo, mas por enquanto vamos apenas logar
       }
 
       setIsLoading(false)
     } catch (error) {
       console.error("Erro ao buscar dados do jogo:", error)
+      // Se houver erro de conexão, parar as tentativas
+      if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED')) {
+        console.log("Servidor não está respondendo, parando tentativas...")
+        setIsLoading(false)
+        return
+      }
       toast.error("Erro ao carregar dados do jogo")
       setIsLoading(false)
     }
@@ -111,12 +160,20 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
 
   useEffect(() => {
     fetchGameData()
-    const interval = setInterval(fetchGameData, 2000) // Atualiza a cada 2 segundos
+    const interval = setInterval(fetchGameData, 5000) // Atualiza a cada 5 segundos para reduzir carga
     return () => clearInterval(interval)
   }, [gameId, playerId])
 
   const handleAnswerChange = async (categoryId: string, value: string) => {
     if (!currentRound || hasStopped) return
+
+    console.log("Salvando resposta:", { 
+      roundId: currentRound.id, 
+      playerId, 
+      playerName, 
+      categoryId: parseInt(categoryId), 
+      answer: value 
+    })
 
     setPlayerAnswers(prev => ({
       ...prev,
@@ -124,31 +181,37 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
     }))
 
     try {
-      await savePlayerAnswer(currentRound.id, playerId, parseInt(categoryId), value)
+      const result = await savePlayerAnswer(currentRound.id, playerId, playerName, parseInt(categoryId), value)
+      console.log("Resposta salva com sucesso:", result)
     } catch (error) {
       console.error("Erro ao salvar resposta:", error)
     }
   }
 
-  const handleStop = async () => {
-    if (hasStopped) return
 
+  const handleStopGameForAll = async () => {
     try {
-      await updatePlayerStopStatus(gameId, playerId, true)
-      setHasStopped(true)
-      toast.success("Você parou! Aguarde os outros jogadores.")
+      setStoppingGame(true)
+      console.log("Parando jogo para todos os jogadores...")
+      await stopGameForAll(gameId)
+      console.log("Jogo parado com sucesso!")
+      toast.success("Jogo interrompido para todos os jogadores!")
       
-      // Verificar se todos pararam
-      const allStopped = await checkAllPlayersStopped(gameId)
-      if (allStopped) {
-        toast.info("Todos os jogadores pararam! Iniciando avaliação...")
-        await endRound(currentRound.id)
-        // Aqui você pode navegar para a tela de avaliação
-      }
+      console.log("Ativando tela de votação...")
+      setShowVoting(true)
+      console.log("showVoting definido como true")
     } catch (error) {
-      console.error("Erro ao parar:", error)
-      toast.error("Erro ao parar. Tente novamente.")
+      console.error("Erro ao parar jogo:", error)
+      toast.error("Erro ao parar jogo. Tente novamente.")
+    } finally {
+      setStoppingGame(false)
     }
+  }
+
+  const handleVotingComplete = () => {
+    setShowVoting(false)
+    // Aqui você pode navegar para a próxima rodada ou finalizar o jogo
+    toast.success("Votação concluída!")
   }
 
   const getPlayerInitials = (name: string) => {
@@ -185,6 +248,28 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
           </Card>
         </div>
       </div>
+    )
+  }
+
+  // Mostrar tela de votação se necessário
+  console.log("Verificando tela de votação:", { 
+    showVoting, 
+    currentRound: !!currentRound, 
+    currentRoundId: currentRound?.id,
+    gameStatus: game?.status,
+    roundStatus: currentRound?.status
+  })
+  
+  // Mostrar tela de votação se o jogo está em scoring OU se showVoting é true
+  if ((showVoting || game?.status === "scoring") && currentRound) {
+    console.log("Renderizando tela de votação para roundId:", currentRound.id)
+    return (
+      <VotingScreen
+        gameId={gameId}
+        roundId={currentRound.id}
+        letter={currentRound.letter}
+        onVotingComplete={handleVotingComplete}
+      />
     )
   }
 
@@ -254,7 +339,9 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {categories.map((category) => (
+                  {categories.map((category, index) => {
+                    console.log(`Renderizando categoria ${index + 1}:`, category.name, "ID:", category.id)
+                    return (
                     <div key={category.id} className="space-y-3">
                       <div className="flex items-center gap-3">
                         <div className="w-5 h-5 rounded-full bg-[var(--game-pink)] shadow-lg" />
@@ -267,7 +354,7 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
                         placeholder={`${category.name} com ${currentRound.letter}...`}
                         value={playerAnswers[category.id.toString()] || ""}
                         onChange={(e) => handleAnswerChange(category.id.toString(), e.target.value)}
-                        disabled={hasStopped || game.status !== "playing"}
+                        disabled={hasStopped || !currentRound || currentRound.status !== "playing"}
                         className="category-input text-lg h-12"
                       />
                       {playerAnswers[category.id.toString()] && (
@@ -276,35 +363,49 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
                         </div>
                       )}
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
 
-                {/* Botão STOP */}
+                {/* Botão de Controle */}
                 <div className="mt-6 pt-6 border-t border-border text-center">
-                  <Button
-                    onClick={handleStop}
-                    disabled={hasStopped || game.status !== "playing"}
-                    variant={hasStopped ? "secondary" : "destructive"}
-                    size="lg"
-                    className="px-8 py-3 text-lg"
-                  >
-                    {hasStopped ? (
-                      <>
-                        <CheckCircle className="w-5 h-5 mr-2" />
-                        Você Parou!
-                      </>
-                    ) : (
-                      <>
-                        <Square className="w-5 h-5 mr-2" />
-                        PARAR
-                      </>
-                    )}
-                  </Button>
-                  {hasStopped && (
-                    <p className="text-sm text-muted-foreground mt-2">
-                      Aguarde os outros jogadores terminarem
-                    </p>
-                  )}
+                  {/* Verificar se todos os campos estão preenchidos */}
+                  {(() => {
+                    const allFieldsFilled = categories.every(category => {
+                      const answer = playerAnswers[category.id.toString()]
+                      return answer && answer.trim().length > 0
+                    })
+                    
+                    return (
+                      <div>
+                        <Button
+                          onClick={handleStopGameForAll}
+                          disabled={stoppingGame || game.status !== "playing" || !allFieldsFilled}
+                          variant="outline"
+                          size="lg"
+                          className="px-8 py-3 text-lg border-red-500 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          {stoppingGame ? (
+                            <>
+                              <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
+                              Parando...
+                            </>
+                          ) : (
+                            <>
+                              <Square className="w-5 h-5 mr-2" />
+                              PARAR PARA TODOS
+                            </>
+                          )}
+                        </Button>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {allFieldsFilled 
+                            ? "Interrompe o jogo para todos e inicia votação"
+                            : "Preencha todos os campos para poder parar o jogo"
+                          }
+                        </p>
+                      </div>
+                    )
+                  })()}
                 </div>
               </CardContent>
             </Card>
