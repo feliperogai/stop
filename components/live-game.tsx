@@ -93,6 +93,14 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
         setHasStopped(currentParticipant.has_stopped)
       }
 
+      // Se há uma rodada em status "waiting", iniciar automaticamente
+      if (currentRoundData && currentRoundData.status === 'waiting') {
+        await startRound(currentRoundData.id)
+        // Recarregar dados para pegar a rodada iniciada
+        const updatedRoundData = await getCurrentRound(gameId)
+        setCurrentRound(updatedRoundData)
+      }
+
       setIsLoading(false)
     } catch (error) {
       console.error("Erro ao buscar dados do jogo:", error)

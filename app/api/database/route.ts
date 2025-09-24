@@ -91,6 +91,15 @@ export async function POST(request: NextRequest) {
           )
         }
         
+        // Criar a primeira rodada automaticamente
+        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        const randomLetter = letters[Math.floor(Math.random() * letters.length)]
+        
+        const roundResult = await query(
+          'INSERT INTO rounds (game_id, round_number, letter, duration, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+          [game.id, 1, randomLetter, 60, 'waiting']
+        )
+        
         return NextResponse.json({ success: true, data: game })
 
       case 'getGame':
