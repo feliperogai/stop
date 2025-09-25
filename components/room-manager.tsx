@@ -280,7 +280,7 @@ export function RoomManager({ onRoomJoined }: RoomManagerProps) {
                 </div>
                 <div className="space-y-1">
                   <Badge variant="secondary" className="text-xs">2</Badge>
-                  <p>Jogue 10 rodadas com diferentes letras</p>
+                  <p>Jogue 5 rodadas com diferentes letras</p>
                 </div>
                 <div className="space-y-1">
                   <Badge variant="secondary" className="text-xs">3</Badge>

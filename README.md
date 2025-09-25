@@ -11,7 +11,7 @@ Um jogo Stop online em tempo real com funcionalidades avançadas, conectado ao b
 - **Host** pode iniciar a partida quando todos estiverem prontos
 
 ### Jogo ao Vivo
-- **10 rodadas** por partida (conforme solicitado)
+- **5 rodadas** por partida (conforme solicitado)
 - **STOP individual** - cada jogador pode parar quando quiser
 - **Tempo real** - atualizações automáticas a cada 2 segundos
 - **8 categorias** padrão: Nome, Animal, Objeto, Comida, Lugar, Profissão, Cor, Marca
@@ -75,10 +75,10 @@ O projeto estará disponível em `http://localhost:3000`
 
 ### 6. Próxima Rodada
 - Após avaliação, próxima rodada inicia automaticamente
-- Processo se repete por 10 rodadas
+- Processo se repete por 5 rodadas
 
 ### 7. Fim da Partida
-- Após 10 rodadas, vencedor é anunciado
+- Após 5 rodadas, vencedor é anunciado
 - Dados são limpos automaticamente
 - Opção de jogar novamente
 
@@ -87,7 +87,7 @@ O projeto estará disponível em `http://localhost:3000`
 ### Tabelas Principais
 - `players` - Jogadores temporários (por sessão)
 - `game_rooms` - Salas de jogo com códigos únicos
-- `games` - Partidas temporárias (10 rodadas)
+- `games` - Partidas temporárias (5 rodadas)
 - `game_participants` - Participantes de cada partida
 - `rounds` - Rodadas individuais
 - `player_answers` - Respostas dos jogadores
@@ -148,7 +148,7 @@ Para fazer deploy em produção:
 
 - **Dados temporários**: Nenhum dado é armazenado permanentemente
 - **Limpeza automática**: Sistema limpa dados expirados a cada 5 minutos
-- **10 rodadas**: Cada partida tem exatamente 10 rodadas
+- **5 rodadas**: Cada partida tem exatamente 5 rodadas
 - **STOP individual**: Cada jogador controla quando para
 - **Avaliação coletiva**: Todos avaliam as respostas de todos
 

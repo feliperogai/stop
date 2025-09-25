@@ -46,7 +46,7 @@ export function PlayerHistory({ playerId, playerName }: PlayerHistoryProps) {
               Todas as partidas e dados são limpos automaticamente após o fim de cada jogo.
             </p>
             <div className="bg-muted/50 p-4 rounded-lg text-sm text-left space-y-2">
-              <p><strong>•</strong> Cada partida tem 10 rodadas</p>
+              <p><strong>•</strong> Cada partida tem 5 rodadas</p>
               <p><strong>•</strong> Dados são limpos automaticamente após o fim</p>
               <p><strong>•</strong> Salas expiram em 2 horas</p>
               <p><strong>•</strong> Nenhum histórico permanente é mantido</p>

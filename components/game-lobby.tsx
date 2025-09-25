@@ -432,8 +432,8 @@ export function GameLobby({ roomCode, playerName, isHost, onGameStart }: GameLob
               <h3 className="font-semibold text-lg">Regras do Jogo</h3>
               <div className="grid md:grid-cols-3 gap-4 text-sm text-muted-foreground">
                 <div className="space-y-1">
-                  <Badge variant="secondary" className="text-xs">10 Rodadas</Badge>
-                  <p>Cada partida tem 10 rodadas com letras diferentes</p>
+                  <Badge variant="secondary" className="text-xs">5 rodadas</Badge>
+                  <p>Cada partida tem 5 rodadas com letras diferentes</p>
                 </div>
                 <div className="space-y-1">
                   <Badge variant="secondary" className="text-xs">STOP Individual</Badge>
