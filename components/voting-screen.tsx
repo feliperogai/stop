@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown } from "lucide-react"
-import { getGameParticipants, getPlayerAnswers, voteOnAnswer, getVotingResults, markPlayerReadyForNextCategory, getPlayersReadyForCategory, saveRoundScore, updatePlayerScore } from "@/lib/api-client"
+import { Clock } from "lucide-react"
+import { getGameParticipants, getPlayerAnswers, voteOnAnswer, getVotingResults, markPlayerReadyForNextCategory, getPlayersReadyForCategory, saveRoundScore, updatePlayerScore, markAnswerAsDuplicate, getUserVotes } from "@/lib/api-client"
 import { getUserSession } from "@/lib/session"
 import { calculateRoundScores } from "@/lib/scoring"
 import { toast } from "sonner"
@@ -41,7 +41,7 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
   const [loading, setLoading] = useState(true)
   const [voting, setVoting] = useState(false)
   const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null)
-  const [currentAnswers, setCurrentAnswers] = useState<Answer[]>([])
+  const [currentAnswers, setCurrentAnswers] = useState<PlayerAnswer[]>([])
   const [currentCategory, setCurrentCategory] = useState("")
   const [totalCategories, setTotalCategories] = useState(0)
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0)
@@ -49,6 +49,9 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [isReadyForNext, setIsReadyForNext] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [playerVotes, setPlayerVotes] = useState<{ [answerId: number]: boolean }>({})
+  const [duplicateAnswers, setDuplicateAnswers] = useState<{ [answerId: number]: boolean }>({})
+  const [userVotes, setUserVotes] = useState<{ [answerId: number]: { is_valid: boolean | null, is_duplicate: boolean | null } }>({})
 
   useEffect(() => {
     const session = getUserSession()
@@ -194,6 +197,25 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
     }
   }
 
+  const loadUserVotes = async () => {
+    if (!currentPlayerId) return
+    
+    try {
+      console.log("🔄 Carregando votos do usuário atual:", currentPlayerId)
+      const votes = await getUserVotes(roundId, currentPlayerId)
+      console.log("Votos do usuário carregados:", votes)
+      
+      // Mesclar com estado local existente para não sobrescrever mudanças recentes
+      setUserVotes(prev => {
+        const merged = { ...prev, ...votes }
+        console.log("Estado mesclado:", merged)
+        return merged
+      })
+    } catch (error) {
+      console.error("Erro ao carregar votos do usuário:", error)
+    }
+  }
+
   const fetchVotingData = async () => {
     try {
       setLoading(true)
@@ -204,6 +226,9 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
         getVotingResults(roundId),
         getGameParticipants(gameId)
       ])
+      
+      // Carregar votos do usuário atual
+      await loadUserVotes()
       
       console.log("Participantes do jogo:", participants)
       setTotalPlayers(participants.length)
@@ -296,30 +321,48 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
   }
 
   const handleVote = async (answerId: number, isValid: boolean) => {
-    if (!currentPlayerId) return
+    if (!currentPlayerId) {
+      console.log("❌ handleVote: currentPlayerId não definido")
+      return
+    }
     
-    console.log("Votando:", { answerId, isValid, playerId: currentPlayerId })
+    console.log("🗳️ Iniciando voto:", { answerId, isValid, playerId: currentPlayerId })
     
     try {
       setVoting(true)
+      console.log("🗳️ Chamando voteOnAnswer...")
       await voteOnAnswer(answerId, currentPlayerId, isValid)
+      console.log("🗳️ voteOnAnswer concluído com sucesso")
       
-      // Atualizar votos locais
-      setPlayerVotes(prev => ({
+      // Atualizar estado local imediatamente para feedback visual
+      setUserVotes(prev => ({
         ...prev,
-        [answerId]: isValid
+        [answerId]: {
+          ...prev[answerId],
+          is_valid: isValid,
+          is_duplicate: false
+        }
       }))
       
-      // Atualizar respostas locais para mostrar a cor
-      setCurrentAnswers(prev => 
-        prev.map(answer => 
-          answer.id === answerId 
-            ? { ...answer, is_valid: isValid }
-            : answer
-        )
-      )
+      console.log("🗳️ Estado local atualizado:", { answerId, isValid })
       
-      console.log("Voto registrado com sucesso")
+      // Recarregar votos do usuário para manter consistência (em background)
+      setTimeout(() => {
+        loadUserVotes()
+      }, 1000)
+      
+      // Marcar jogador como pronto para esta categoria
+      console.log("🗳️ Marcando jogador como pronto...")
+      await markPlayerReadyForNextCategory(gameId, currentPlayerId, currentCategoryIndex)
+      setIsReadyForNext(true)
+      console.log("🗳️ Jogador marcado como pronto")
+      
+      console.log("🗳️ Voto registrado com sucesso")
+      
+      // Verificar se todos votaram para avançar automaticamente
+      console.log("🗳️ Verificando se todos estão prontos...")
+      await checkAllPlayersReady()
+      console.log("🗳️ Verificação de jogadores prontos concluída")
       
     } catch (error) {
       console.error("Erro ao votar:", error)
@@ -330,30 +373,49 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
   }
 
   const handleMarkDuplicate = async (answerId: number) => {
-    if (!currentPlayerId) return
+    if (!currentPlayerId) {
+      console.log("❌ handleMarkDuplicate: currentPlayerId não definido")
+      return
+    }
     
-    console.log("Marcando resposta como duplicada:", { answerId, playerId: currentPlayerId })
+    console.log("📋 Iniciando marcação como duplicada:", { answerId, playerId: currentPlayerId })
     
     try {
       setVoting(true)
+      console.log("📋 Chamando markAnswerAsDuplicate...")
       await markAnswerAsDuplicate(answerId, currentPlayerId)
+      console.log("📋 markAnswerAsDuplicate concluído com sucesso")
       
-      // Atualizar estado local
-      setDuplicateAnswers(prev => ({
+      // Atualizar estado local imediatamente para feedback visual
+      setUserVotes(prev => ({
         ...prev,
-        [answerId]: true
+        [answerId]: {
+          ...prev[answerId],
+          is_valid: null,
+          is_duplicate: true
+        }
       }))
       
-      // Atualizar respostas locais para mostrar que é duplicada
-      setCurrentAnswers(prev => 
-        prev.map(answer => 
-          answer.id === answerId 
-            ? { ...answer, is_duplicate: true }
-            : answer
-        )
-      )
+      console.log("📋 Estado local atualizado (duplicada):", { answerId, is_duplicate: true })
       
-      console.log("Resposta marcada como duplicada com sucesso")
+      // Recarregar votos do usuário para manter consistência (em background)
+      setTimeout(() => {
+        loadUserVotes()
+      }, 1000)
+      
+      // Marcar jogador como pronto para esta categoria
+      console.log("📋 Marcando jogador como pronto...")
+      await markPlayerReadyForNextCategory(gameId, currentPlayerId, currentCategoryIndex)
+      setIsReadyForNext(true)
+      console.log("📋 Jogador marcado como pronto")
+      
+      console.log("📋 Resposta marcada como duplicada com sucesso")
+      
+      // Verificar se todos votaram para avançar automaticamente
+      console.log("📋 Verificando se todos estão prontos...")
+      await checkAllPlayersReady()
+      console.log("📋 Verificação de jogadores prontos concluída")
+      
       toast.success("Resposta marcada como duplicada (5 pontos)")
       
     } catch (error) {
@@ -364,37 +426,245 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
     }
   }
 
-  const handleNextCategory = async () => {
-    if (!currentPlayerId) return
-    
-    console.log("Avançando categoria:", { 
-      currentCategoryIndex, 
-      totalCategories, 
-      playerId: currentPlayerId 
-    })
-    
+  
+  const calculateAndSaveScores = async () => {
     try {
-      // Marcar jogador como pronto para próxima categoria
-      await markPlayerReadyForNextCategory(gameId, currentPlayerId, currentCategoryIndex)
-      setIsReadyForNext(true)
+      console.log("Calculando pontuações da rodada...")
       
-      console.log("Jogador marcado como pronto para categoria:", currentCategoryIndex)
+      // Buscar todas as respostas da rodada com pontos já calculados
+      const allAnswers = await getPlayerAnswers(roundId)
+      console.log("Respostas encontradas:", allAnswers.length)
+      
+      if (allAnswers.length === 0) {
+        console.log("Nenhuma resposta encontrada para calcular pontos")
+        return
+      }
+      
+      // Buscar participantes do jogo
+      const participants = await getGameParticipants(gameId)
+      console.log("Participantes:", participants.length)
+      
+      // Agrupar respostas por jogador e somar pontos
+      const playerScores: { [playerId: string]: { totalPoints: number, validAnswers: number } } = {}
+      
+      for (const answer of allAnswers) {
+        if (!playerScores[answer.player_id]) {
+          playerScores[answer.player_id] = { totalPoints: 0, validAnswers: 0 }
+        }
+        
+        // Usar os pontos já calculados pela API
+        const points = answer.points || 0
+        playerScores[answer.player_id].totalPoints += points
+        
+        if (answer.is_valid && points > 0) {
+          playerScores[answer.player_id].validAnswers++
+        }
+      }
+      
+      // Calcular bônus por completar todas as categorias
+      const totalCategories = new Set(allAnswers.map(a => a.category_id)).size
+      
+      // Salvar pontuações no banco
+      for (const [playerId, score] of Object.entries(playerScores)) {
+        const bonusPoints = score.validAnswers === totalCategories ? 5 : 0
+        const finalScore = score.totalPoints + bonusPoints
+        
+        console.log(`Salvando pontos para jogador ${playerId}: ${score.totalPoints} + ${bonusPoints} bônus = ${finalScore} pts`)
+        
+        await saveRoundScore(
+          roundId,
+          parseInt(playerId),
+          score.totalPoints,
+          bonusPoints,
+          1 // posição temporária
+        )
+        
+        // Atualizar pontuação total do jogador
+        const participant = participants.find(p => p.id === parseInt(playerId))
+        if (participant) {
+          const newTotalScore = participant.total_score + finalScore
+          console.log(`Atualizando pontuação total do jogador ${participant.player_name}: ${participant.total_score} + ${finalScore} = ${newTotalScore}`)
+          await updatePlayerScore(gameId, parseInt(playerId), newTotalScore)
+        }
+      }
+      
+      console.log("Pontuações calculadas e salvas com sucesso!")
+      
+    } catch (error) {
+      console.error("Erro ao calcular pontuações:", error)
+      toast.error("Erro ao calcular pontuações")
+    }
+  }
+
+  const checkAllWordsVoted = async () => {
+    try {
+      // Verificar se todos os jogadores votaram em todas as palavras desta categoria
+      const allAnswers = await getPlayerAnswers(roundId)
+      console.log("🔍 Todas as respostas do round:", allAnswers)
+      
+      const categoryAnswers = allAnswers.filter(answer => 
+        answer.category_name === currentCategory || answer.category_id === currentCategory
+      )
+      
+      console.log("🔍 Verificando votos - Categoria atual:", currentCategory)
+      console.log("🔍 Respostas da categoria atual:", categoryAnswers.length)
+      console.log("🔍 Respostas encontradas:", categoryAnswers.map(a => ({ id: a.id, answer: a.answer, category_name: a.category_name })))
+      console.log("🔍 Total de jogadores:", totalPlayers)
+      
+      if (categoryAnswers.length === 0) {
+        console.log("❌ Nenhuma resposta encontrada para esta categoria")
+        return false
+      }
+      
+      // Verificar se todos os jogadores votaram em todas as palavras
+      for (const answer of categoryAnswers) {
+        console.log(`🔍 Verificando palavra ${answer.id} (${answer.answer})`)
+        // Verificar se todos os jogadores votaram nesta palavra
+        const allPlayersVoted = await checkAllPlayersVotedOnAnswer(answer.id)
+        console.log(`🔍 Palavra ${answer.id}: todos votaram = ${allPlayersVoted}`)
+        if (!allPlayersVoted) {
+          console.log(`❌ Palavra ${answer.id} não foi votada por todos os jogadores`)
+          return false
+        }
+      }
+      
+      console.log("✅ Todas as palavras foram votadas por todos os jogadores")
+      return true
+    } catch (error) {
+      console.error("❌ Erro ao verificar se todas as palavras foram votadas:", error)
+      return false
+    }
+  }
+
+  const checkAllPlayersVotedOnAnswer = async (answerId: number) => {
+    try {
+      const response = await fetch('/api/database', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          action: 'checkAllPlayersVotedOnAnswer', 
+          params: { answerId, totalPlayers } 
+        }),
+      })
+      
+      const result = await response.json()
+      return result.success ? result.data : false
+    } catch (error) {
+      console.error("Erro ao verificar votos na palavra:", error)
+      return false
+    }
+  }
+
+  const recalculateCategoryPoints = async () => {
+    try {
+      // Buscar a categoria atual
+      const allAnswers = await getPlayerAnswers(roundId)
+      const categoryAnswers = allAnswers.filter(answer => 
+        answer.category_name === currentCategory || answer.category_id === currentCategory
+      )
+      
+      if (categoryAnswers.length === 0) {
+        console.log("Nenhuma resposta encontrada para recalcular")
+        return
+      }
+      
+      const categoryId = categoryAnswers[0].category_id
+      
+      const response = await fetch('/api/database', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          action: 'recalculateCategoryPoints', 
+          params: { roundId, categoryId } 
+        }),
+      })
+      
+      const result = await response.json()
+      if (result.success) {
+        console.log("Pontos da categoria recalculados com sucesso")
+        // Atualizar pontos dos jogadores em tempo real
+        await updatePlayerScoresRealtime()
+      } else {
+        console.error("Erro ao recalcular pontos:", result.error)
+      }
+    } catch (error) {
+      console.error("Erro ao recalcular pontos da categoria:", error)
+    }
+  }
+
+  const updatePlayerScoresRealtime = async () => {
+    try {
+      // Buscar todos os participantes do jogo
+      const participants = await getGameParticipants(gameId)
+      
+      // Para cada participante, calcular pontos totais
+      for (const participant of participants) {
+        const response = await fetch('/api/database', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            action: 'getPlayerTotalScore', 
+            params: { gameId, playerId: participant.id } 
+          }),
+        })
+        
+        const result = await response.json()
+        if (result.success) {
+          const totalScore = result.data || 0
+          console.log(`Atualizando pontuação do jogador ${participant.player_name}: ${totalScore} pts`)
+          await updatePlayerScore(gameId, participant.id, totalScore)
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao atualizar pontuações em tempo real:", error)
+    }
+  }
+
+  const checkAllPlayersReady = async () => {
+    try {
+      console.log("🚀 Iniciando verificação de jogadores prontos...")
+      console.log("🚀 Parâmetros:", { gameId, currentCategoryIndex, totalPlayers })
+      
+      const readyPlayers = await getPlayersReadyForCategory(gameId, currentCategoryIndex)
+      console.log("🚀 Jogadores prontos recebidos:", readyPlayers)
+      
+      setPlayersReady(readyPlayers)
       
       // Verificar se todos estão prontos
-      const readyPlayers = await getPlayersReadyForCategory(gameId, currentCategoryIndex)
       const readyCount = readyPlayers.filter(player => player.is_ready === true).length
       const allReady = readyCount === totalPlayers && totalPlayers > 0
       
-      console.log("Jogadores prontos:", readyCount, "de", totalPlayers, "Todos prontos:", allReady)
-      console.log("currentCategoryIndex:", currentCategoryIndex, "totalCategories:", totalCategories)
+      console.log("🚀 Análise de jogadores prontos:")
+      console.log("  - Jogadores prontos:", readyCount)
+      console.log("  - Total de jogadores:", totalPlayers)
+      console.log("  - Todos prontos:", allReady)
+      console.log("  - Categoria atual:", currentCategoryIndex)
       
-      if (allReady) {
-        console.log("🎉 Todos estão prontos! Avançando categoria...")
+      // Verificar se todos votaram em todas as palavras desta categoria
+      console.log("🚀 Verificando se todas as palavras foram votadas...")
+      const allWordsVoted = await checkAllWordsVoted()
+      
+      console.log("🚀 Resultado final da verificação:")
+      console.log("  - Todos prontos:", allReady)
+      console.log("  - Todas as palavras votadas:", allWordsVoted)
+      console.log("  - Pode avançar:", allReady && allWordsVoted)
+      
+      if (allReady && allWordsVoted) {
+        console.log("🎉 CONDIÇÃO ATENDIDA! Todos votaram em todas as palavras! Recalculando pontos e avançando...")
+        
+        // Recalcular pontos da categoria atual baseado na maioria
+        await recalculateCategoryPoints()
         
         // Parar verificação periódica imediatamente
         setIsReadyForNext(false)
         
-        // Todos estão prontos, avançar para próxima categoria
+        // Todos votaram, avançar para próxima categoria
         if (currentCategoryIndex < totalCategories - 1) {
           const nextIndex = currentCategoryIndex + 1
           console.log("Avançando para categoria:", nextIndex, "de", totalCategories)
@@ -420,114 +690,7 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
           onVotingComplete()
         }
       } else {
-        console.log("⏳ Ainda aguardando outros jogadores:", readyCount, "de", totalPlayers)
-        // Aguardar um pouco antes de verificar para evitar conflitos
-        setTimeout(() => {
-          checkAllPlayersReady()
-        }, 1000)
-      }
-      
-    } catch (error) {
-      console.error("Erro ao marcar como pronto:", error)
-      toast.error("Erro ao avançar categoria")
-    }
-  }
-  
-  const calculateAndSaveScores = async () => {
-    try {
-      console.log("Calculando pontuações da rodada...")
-      
-      // Buscar todas as respostas da rodada
-      const allAnswers = await getPlayerAnswers(roundId)
-      console.log("Respostas encontradas:", allAnswers.length)
-      
-      if (allAnswers.length === 0) {
-        console.log("Nenhuma resposta encontrada para calcular pontos")
-        return
-      }
-      
-      // Buscar participantes do jogo
-      const participants = await getGameParticipants(gameId)
-      console.log("Participantes:", participants.length)
-      
-      // Agrupar respostas por jogador
-      const playersAnswers: { [playerId: string]: { [categoryId: string]: string } } = {}
-      
-      for (const answer of allAnswers) {
-        if (!playersAnswers[answer.player_id]) {
-          playersAnswers[answer.player_id] = {}
-        }
-        playersAnswers[answer.player_id][answer.category_id] = answer.answer
-      }
-      
-      // Buscar categorias do jogo
-      const categories = allAnswers.reduce((acc: any[], answer) => {
-        if (!acc.find(cat => cat.id === answer.category_id)) {
-          acc.push({
-            id: answer.category_id.toString(),
-            name: answer.category_name || `Categoria ${answer.category_id}`
-          })
-        }
-        return acc
-      }, [])
-      
-      console.log("Categorias encontradas:", categories.length)
-      
-      // Calcular pontuações usando a lógica existente
-      const results = calculateRoundScores(playersAnswers, categories, letter)
-      console.log("Resultados calculados:", results.length)
-      
-      // Salvar pontuações no banco
-      for (const result of results) {
-        console.log(`Salvando pontos para jogador ${result.playerId}: ${result.finalScore} pts`)
-        
-        await saveRoundScore(
-          roundId,
-          parseInt(result.playerId),
-          result.totalPoints,
-          result.bonusPoints,
-          results.indexOf(result) + 1
-        )
-        
-        // Atualizar pontuação total do jogador
-        const participant = participants.find(p => p.id === parseInt(result.playerId))
-        if (participant) {
-          const newTotalScore = participant.total_score + result.finalScore
-          console.log(`Atualizando pontuação total do jogador ${participant.player_name}: ${participant.total_score} + ${result.finalScore} = ${newTotalScore}`)
-          await updatePlayerScore(gameId, parseInt(result.playerId), newTotalScore)
-        }
-      }
-      
-      console.log("Pontuações calculadas e salvas com sucesso!")
-      
-    } catch (error) {
-      console.error("Erro ao calcular pontuações:", error)
-      toast.error("Erro ao calcular pontuações")
-    }
-  }
-
-  const checkAllPlayersReady = async () => {
-    try {
-      const readyPlayers = await getPlayersReadyForCategory(gameId, currentCategoryIndex)
-      console.log("Jogadores prontos:", readyPlayers)
-      console.log("Total de jogadores:", totalPlayers)
-      console.log("Categoria atual:", currentCategoryIndex)
-      
-      setPlayersReady(readyPlayers)
-      
-      // Verificar se todos estão prontos
-      const readyCount = readyPlayers.filter(player => player.is_ready === true).length
-      const allReady = readyCount === totalPlayers && totalPlayers > 0
-      
-      console.log("Jogadores prontos:", readyCount, "de", totalPlayers, "Todos prontos:", allReady)
-      
-      // NÃO avançar automaticamente - apenas mostrar status
-      if (allReady) {
-        console.log("🎉 Todos estão prontos! Aguardando clique em 'Continuar'...")
-        // Parar verificação periódica imediatamente
-        setIsReadyForNext(false)
-      } else {
-        console.log("⏳ Ainda aguardando jogadores:", readyCount, "de", totalPlayers)
+        console.log("⏳ Aguardando outros jogadores votarem em todas as palavras:", readyCount, "de", totalPlayers)
       }
     } catch (error) {
       console.error("Erro ao verificar jogadores prontos:", error)
@@ -599,9 +762,6 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
                   {currentCategory}
                 </Badge>
               </div>
-              <p className="text-muted-foreground">
-                Clique nas respostas para votar como inválidas (vermelho). Clique em Continuar para avançar.
-              </p>
             </div>
           </CardHeader>
           
@@ -612,22 +772,20 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
                   <p className="text-lg text-muted-foreground">Nenhuma resposta encontrada para esta categoria.</p>
                 </div>
               ) : (
-                currentAnswers.map((answer) => (
+                currentAnswers.map((answer) => {
+                  console.log(`Renderizando resposta ${answer.id}:`, userVotes[answer.id])
+                  return (
                   <Card 
                     key={answer.id} 
-                    className={`border-2 cursor-pointer transition-all duration-200 ${
-                      answer.is_valid === true 
-                        ? 'border-green-500 bg-green-50' 
-                        : answer.is_valid === false 
-                        ? 'border-red-500 bg-red-50' 
-                        : 'border-gray-300 hover:border-[var(--game-teal)]'
+                    className={`border-2 transition-all duration-200 ${
+                      userVotes[answer.id]?.is_valid === true 
+                        ? 'border-green-500 bg-green-50 shadow-lg' 
+                        : userVotes[answer.id]?.is_valid === false 
+                        ? 'border-red-500 bg-red-50 shadow-lg' 
+                        : userVotes[answer.id]?.is_duplicate === true
+                        ? 'border-orange-500 bg-orange-50 shadow-lg'
+                        : 'border-gray-300'
                     }`}
-                    onClick={() => {
-                      if (answer.is_valid === null) {
-                        // Se ainda não foi votado, votar como inválido (vermelho)
-                        handleVote(answer.id, false)
-                      }
-                    }}
                   >
                     <CardContent className="pt-6">
                       <div className="flex items-center justify-between">
@@ -638,15 +796,19 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <h3 className="font-semibold text-lg">{answer.player_name}</h3>
+                            {answer.answer && answer.answer.trim() && (
+                              <h3 className="font-semibold text-lg">{answer.player_name}</h3>
+                            )}
                             <p className={`text-2xl font-bold ${
-                              answer.is_valid === true 
+                              userVotes[answer.id]?.is_valid === true 
                                 ? 'text-green-600' 
-                                : answer.is_valid === false 
+                                : userVotes[answer.id]?.is_valid === false 
                                 ? 'text-red-600' 
+                                : userVotes[answer.id]?.is_duplicate === true
+                                ? 'text-orange-600'
                                 : 'text-[var(--game-pink)]'
                             }`}>
-                              {answer.answer}
+                              {answer.answer || "Sem resposta"}
                             </p>
                             {answer.is_duplicate && (
                               <div className="text-sm text-orange-600 font-medium flex items-center gap-1">
@@ -657,115 +819,93 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
                         </div>
                         
                         <div className="flex items-center gap-4">
-                          {/* Mostrar votos atuais */}
-                          <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1">
-                              <ThumbsUp className="w-4 h-4 text-green-500" />
-                              <span className="text-sm font-medium">{answer.votes_for}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <ThumbsDown className="w-4 h-4 text-red-500" />
-                              <span className="text-sm font-medium">{answer.votes_against}</span>
-                            </div>
-                          </div>
-                          
-                          {/* Status do voto */}
-                          {answer.is_valid === null ? (
-                            <Badge variant="outline" className="text-gray-600 border-gray-600">
-                              Clique para votar
-                            </Badge>
-                          ) : answer.is_valid ? (
-                            <Badge variant="outline" className="text-green-600 border-green-600">
-                              <CheckCircle className="w-4 h-4 mr-1" />
-                              Válido
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-red-600 border-red-600">
-                              <XCircle className="w-4 h-4 mr-1" />
-                              Inválido
-                            </Badge>
-                          )}
-                          
                           {/* Botões de ação */}
                           <div className="flex items-center gap-2">
                             <Button
                               size="sm"
-                              variant="outline"
+                              variant={userVotes[answer.id]?.is_valid === true ? "default" : "outline"}
                               onClick={(e) => {
                                 e.stopPropagation()
+                                console.log("Clique CERTO - Estado atual:", userVotes[answer.id])
                                 handleVote(answer.id, true)
                               }}
-                              className="bg-green-50 border-green-300 text-green-700 hover:bg-green-100"
+                              className={`transition-all duration-200 ${
+                                userVotes[answer.id]?.is_valid === true 
+                                  ? "bg-green-600 text-white border-green-600 shadow-lg scale-105" 
+                                  : "bg-green-50 border-green-300 text-green-700 hover:bg-green-100"
+                              }`}
                               disabled={voting}
                             >
-                              ✓ Válida
+                              ✓ CERTO
                             </Button>
                             <Button
                               size="sm"
-                              variant="outline"
+                              variant={userVotes[answer.id]?.is_valid === false ? "destructive" : "outline"}
                               onClick={(e) => {
                                 e.stopPropagation()
+                                console.log("Clique ERRADO - Estado atual:", userVotes[answer.id])
                                 handleVote(answer.id, false)
                               }}
-                              className="bg-red-50 border-red-300 text-red-700 hover:bg-red-100"
+                              className={`transition-all duration-200 ${
+                                userVotes[answer.id]?.is_valid === false 
+                                  ? "bg-red-600 text-white border-red-600 shadow-lg scale-105" 
+                                  : "bg-red-50 border-red-300 text-red-700 hover:bg-red-100"
+                              }`}
                               disabled={voting}
                             >
-                              ✗ Inválida
+                              ✗ ERRADO
                             </Button>
-                            {!answer.is_duplicate && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleMarkDuplicate(answer.id)
-                                }}
-                                className="bg-orange-50 border-orange-300 text-orange-700 hover:bg-orange-100"
-                                disabled={voting}
-                              >
-                                📋 Igual
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              variant={userVotes[answer.id]?.is_duplicate === true ? "secondary" : "outline"}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                console.log("Clique IGUAL - Estado atual:", userVotes[answer.id])
+                                handleMarkDuplicate(answer.id)
+                              }}
+                              className={`transition-all duration-200 ${
+                                userVotes[answer.id]?.is_duplicate === true 
+                                  ? "bg-orange-600 text-white border-orange-600 shadow-lg scale-105" 
+                                  : "bg-orange-50 border-orange-300 text-orange-700 hover:bg-orange-100"
+                              }`}
+                              disabled={voting}
+                            >
+                              📋 IGUAL
+                            </Button>
                           </div>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
-                ))
+                  )
+                })
               )}
             </div>
             
-            {/* Botão Continuar e Status */}
+            {/* Status de Votação */}
             <div className="mt-8 text-center space-y-4">
-              {isReadyForNext ? (
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">
-                    Aguardando outros jogadores clicarem em "Continuar"...
-                  </p>
-                  <div className="flex justify-center gap-2">
-                    {playersReady.map((player, index) => (
-                      <Badge 
-                        key={player.player_id}
-                        variant={player.is_ready ? "default" : "outline"}
-                        className={player.is_ready ? "bg-green-600" : ""}
-                      >
-                        {player.player_name}
-                      </Badge>
-                    ))}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {playersReady.filter(p => p.is_ready).length} de {totalPlayers} jogadores prontos
-                  </p>
+              <div className="space-y-2">
+                <p className="text-muted-foreground">
+                  {currentCategoryIndex >= totalCategories - 1 
+                    ? "Última categoria - vote nas respostas para finalizar"
+                    : "Vote nas respostas para avançar para próxima categoria"
+                  }
+                </p>
+                <div className="flex justify-center gap-2">
+                  {playersReady.map((player, index) => (
+                    <Badge 
+                      key={player.player_id}
+                      variant={player.is_ready ? "default" : "outline"}
+                      className={player.is_ready ? "bg-green-600" : ""}
+                    >
+                      {player.player_name}
+                    </Badge>
+                  ))}
                 </div>
-              ) : (
-                <Button
-                  onClick={handleNextCategory}
-                  className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg"
-                  size="lg"
-                >
-                  Continuar
-                </Button>
-              )}
+                <p className="text-sm text-muted-foreground">
+                  {playersReady.filter(p => p.is_ready).length} de {totalPlayers} jogadores votaram
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>

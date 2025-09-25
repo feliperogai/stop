@@ -262,3 +262,8 @@ export async function resetPlayersStopStatus(gameId: number) {
   const result = await apiCall('resetPlayersStopStatus', { gameId })
   return result.success
 }
+
+export async function getUserVotes(roundId: number, playerId: number) {
+  const result = await apiCall('getUserVotes', { roundId, playerId })
+  return result.success ? result.data : {}
+}

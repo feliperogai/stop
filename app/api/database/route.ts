@@ -10,7 +10,8 @@ const pool = new Pool({
   // Configurações otimizadas para Vercel
   max: 20, // máximo de conexões no pool
   idleTimeoutMillis: 30000, // tempo limite para conexões idle
-  connectionTimeoutMillis: 2000, // tempo limite para conexão
+  connectionTimeoutMillis: 10000, // tempo limite para conexão aumentado
+  query_timeout: 30000, // timeout para queries
 })
 
 // Função para executar queries
@@ -27,6 +28,8 @@ async function query(text: string, params?: any[]) {
 export async function POST(request: NextRequest) {
   try {
     const { action, params } = await request.json()
+    
+    console.log('🔍 API Request:', { action, params })
 
     switch (action) {
       case 'createPlayer':
@@ -446,90 +449,75 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, data: answersResult.rows })
 
       case 'voteOnAnswer':
-        // Verificar se o jogador já votou nesta resposta
-        const existingVote = await query(
-          'SELECT id FROM answer_votes WHERE answer_id = $1 AND player_id = $2',
-          [params.answerId, params.playerId]
-        )
-        
-        if (existingVote.rows.length > 0) {
-          return NextResponse.json({ success: false, error: 'Jogador já votou nesta resposta' })
-        }
-        
-        // Inserir voto
-        await query(
-          'INSERT INTO answer_votes (answer_id, player_id, is_valid) VALUES ($1, $2, $3)',
-          [params.answerId, params.playerId, params.isValid]
-        )
-        
-        // Atualizar contadores de votos
-        const voteCounts = await query(`
-          SELECT 
-            SUM(CASE WHEN is_valid = true THEN 1 ELSE 0 END) as votes_for,
-            SUM(CASE WHEN is_valid = false THEN 1 ELSE 0 END) as votes_against
-          FROM answer_votes 
-          WHERE answer_id = $1
-        `, [params.answerId])
-        
-        const { votes_for, votes_against } = voteCounts.rows[0]
-        
-        // Calcular pontuação baseada nas regras
-        let points = 0
-        const isValid = votes_for > votes_against
-        
-        if (isValid) {
-          // Verificar se é duplicada
-          const answerData = await query('SELECT is_duplicate FROM player_answers WHERE id = $1', [params.answerId])
-          const isDuplicate = answerData.rows[0]?.is_duplicate || false
+        try {
+          console.log('🗳️ Processando voto:', { answerId: params.answerId, playerId: params.playerId, isValid: params.isValid })
           
-          if (isDuplicate) {
-            points = 5 // Resposta duplicada válida
+          // Verificar se o jogador já votou nesta resposta
+          const existingVote = await query(
+            'SELECT id FROM answer_votes WHERE answer_id = $1 AND player_id = $2',
+            [params.answerId, params.playerId]
+          )
+          
+          if (existingVote.rows.length > 0) {
+            // Atualizar voto existente
+            console.log('🗳️ Atualizando voto existente')
+            await query(
+              'UPDATE answer_votes SET is_valid = $1 WHERE answer_id = $2 AND player_id = $3',
+              [params.isValid, params.answerId, params.playerId]
+            )
           } else {
-            // Verificar se é única na categoria
-            const categoryData = await query(`
-              SELECT COUNT(*) as total_answers
-              FROM player_answers pa
-              WHERE pa.category_id = (SELECT category_id FROM player_answers WHERE id = $1)
-                AND pa.round_id = (SELECT round_id FROM player_answers WHERE id = $1)
-                AND pa.is_valid = true
-            `, [params.answerId])
-            
-            const totalAnswers = parseInt(categoryData.rows[0].total_answers)
-            if (totalAnswers === 1) {
-              points = 20 // Resposta única válida
+            // Inserir novo voto
+            console.log('🗳️ Inserindo novo voto')
+            await query(
+              'INSERT INTO answer_votes (answer_id, player_id, is_valid) VALUES ($1, $2, $3)',
+              [params.answerId, params.playerId, params.isValid]
+            )
+          }
+          
+          // Atualizar contadores de votos
+          const voteCounts = await query(`
+            SELECT 
+              SUM(CASE WHEN is_valid = true THEN 1 ELSE 0 END) as votes_for,
+              SUM(CASE WHEN is_valid = false THEN 1 ELSE 0 END) as votes_against
+            FROM answer_votes 
+            WHERE answer_id = $1
+          `, [params.answerId])
+          
+          const { votes_for, votes_against } = voteCounts.rows[0]
+          
+          // Calcular pontuação baseada na maioria dos votos
+          const totalVotes = votes_for + votes_against
+          let points = 0
+          let isValid = false
+          
+          if (totalVotes > 0) {
+            if (votes_for > votes_against) {
+              // Maioria votou CERTO - 10 pontos
+              points = 10
+              isValid = true
+            } else if (votes_against > votes_for) {
+              // Maioria votou ERRADO - 0 pontos
+              points = 0
+              isValid = false
             } else {
-              points = 10 // Resposta normal válida
+              // Empate - considerar como CERTO (10 pontos)
+              points = 10
+              isValid = true
             }
           }
-        }
-        
-        await query(
-          'UPDATE player_answers SET votes_for = $1, votes_against = $2, is_valid = $3, points = $4 WHERE id = $5',
-          [votes_for, votes_against, isValid, points, params.answerId]
-        )
-        
-        // Verificar se todos votaram nesta resposta
-        const totalVotes = await query(
-          'SELECT COUNT(*) as total FROM answer_votes WHERE answer_id = $1',
-          [params.answerId]
-        )
-        
-        const totalPlayers = await query(`
-          SELECT COUNT(*) as total FROM game_participants gp
-          JOIN player_answers pa ON gp.player_name = pa.player_name
-          WHERE pa.id = $1
-        `, [params.answerId])
-        
-        if (parseInt(totalVotes.rows[0].total) >= parseInt(totalPlayers.rows[0].total)) {
-          // Todos votaram, determinar resultado final
-          const finalIsValid = votes_for > votes_against
+          
           await query(
-            'UPDATE player_answers SET is_valid = $1 WHERE id = $2',
-            [finalIsValid, params.answerId]
+            'UPDATE player_answers SET votes_for = $1, votes_against = $2, is_valid = $3, points = $4 WHERE id = $5',
+            [votes_for, votes_against, isValid, points, params.answerId]
           )
+          
+          console.log(`Palavra ${params.answerId}: ${votes_for} votos CERTO, ${votes_against} votos ERRADO. Pontos: ${points}`)
+          
+          return NextResponse.json({ success: true })
+        } catch (error) {
+          console.error('❌ Erro específico em voteOnAnswer:', error)
+          return NextResponse.json({ success: false, error: `Erro ao votar: ${error.message}` }, { status: 500 })
         }
-        
-        return NextResponse.json({ success: true })
 
       case 'getVotingResults':
         const resultsResult = await query(`
@@ -577,7 +565,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true })
 
       case 'getPlayersReadyForCategory':
-        console.log('Buscando jogadores prontos para categoria:', { gameId: params.gameId, categoryIndex: params.categoryIndex })
+        console.log('👥 Buscando jogadores prontos para categoria:', { gameId: params.gameId, categoryIndex: params.categoryIndex })
         
         // Buscar jogadores prontos para categoria
         const readyPlayersResult = await query(`
@@ -591,7 +579,10 @@ export async function POST(request: NextRequest) {
           ORDER BY gp.player_name
         `, [params.gameId, params.categoryIndex])
         
-        console.log('Jogadores encontrados:', readyPlayersResult.rows)
+        console.log('👥 Jogadores encontrados:', readyPlayersResult.rows)
+        
+        const readyCount = readyPlayersResult.rows.filter(p => p.is_ready === true).length
+        console.log(`👥 Jogadores prontos: ${readyCount} de ${readyPlayersResult.rows.length}`)
         
         return NextResponse.json({ success: true, data: readyPlayersResult.rows })
 
@@ -673,24 +664,74 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, data: gameResultsResult.rows })
 
       case 'markAnswerAsDuplicate':
-        console.log('Marcando resposta como duplicada:', { answerId: params.answerId, playerId: params.playerId })
-        
-        // Marcar resposta como duplicada
-        await query('UPDATE player_answers SET is_duplicate = true WHERE id = $1', [params.answerId])
-        
-        // Recalcular pontuação baseada nas regras
-        const answerData = await query('SELECT is_valid FROM player_answers WHERE id = $1', [params.answerId])
-        const answerIsValid = answerData.rows[0]?.is_valid || false
-        
-        let duplicatePoints = 0
-        if (answerIsValid) {
-          duplicatePoints = 5 // Resposta duplicada válida
+        try {
+          console.log('📋 Marcando resposta como duplicada:', { answerId: params.answerId, playerId: params.playerId })
+          
+          // Verificar se já existe voto deste jogador para esta resposta
+          const existingDuplicateVote = await query(
+            'SELECT id, is_valid, is_duplicate FROM answer_votes WHERE answer_id = $1 AND player_id = $2',
+            [params.answerId, params.playerId]
+          )
+          
+          console.log('📋 Voto existente encontrado:', existingDuplicateVote.rows[0])
+          
+          if (existingDuplicateVote.rows.length > 0) {
+            // Atualizar voto existente
+            console.log('📋 Atualizando voto existente para duplicata')
+            await query(
+              'UPDATE answer_votes SET is_duplicate = true, is_valid = NULL WHERE answer_id = $1 AND player_id = $2',
+              [params.answerId, params.playerId]
+            )
+          } else {
+            // Inserir novo voto
+            console.log('📋 Inserindo novo voto de duplicata')
+            await query(
+              'INSERT INTO answer_votes (answer_id, player_id, is_valid, is_duplicate) VALUES ($1, $2, NULL, true)',
+              [params.answerId, params.playerId]
+            )
+          }
+          
+          // Verificar se o voto foi inserido/atualizado corretamente
+          const verifyVote = await query(
+            'SELECT id, is_valid, is_duplicate FROM answer_votes WHERE answer_id = $1 AND player_id = $2',
+            [params.answerId, params.playerId]
+          )
+          console.log('📋 Voto verificado após inserção/atualização:', verifyVote.rows[0])
+          
+          // Marcar resposta como duplicada
+          await query('UPDATE player_answers SET is_duplicate = true WHERE id = $1', [params.answerId])
+          
+          // Verificar se a maioria dos jogadores marcou como IGUAL
+          const duplicateVotes = await query(`
+            SELECT COUNT(*) as duplicate_count
+            FROM answer_votes 
+            WHERE answer_id = $1 AND is_duplicate = true
+          `, [params.answerId])
+          
+          const totalPlayers = await query(`
+            SELECT COUNT(*) as total
+            FROM game_participants gp
+            JOIN rounds r ON gp.game_id = r.game_id
+            WHERE r.id = (SELECT round_id FROM player_answers WHERE id = $1)
+          `, [params.answerId])
+          
+          const duplicateCount = parseInt(duplicateVotes.rows[0].duplicate_count)
+          const totalPlayersCount = parseInt(totalPlayers.rows[0].total)
+          
+          // Se maioria marcou como IGUAL, dar 5 pontos
+          let duplicatePoints = 0
+          if (duplicateCount > totalPlayersCount / 2) {
+            duplicatePoints = 5 // Maioria votou IGUAL - 5 pontos
+          }
+          
+          await query('UPDATE player_answers SET points = $1 WHERE id = $2', [duplicatePoints, params.answerId])
+          
+          console.log(`Resposta ${params.answerId}: ${duplicateCount} marcaram como IGUAL de ${totalPlayersCount} jogadores. Pontos: ${duplicatePoints}`)
+          return NextResponse.json({ success: true })
+        } catch (error) {
+          console.error('❌ Erro específico em markAnswerAsDuplicate:', error)
+          return NextResponse.json({ success: false, error: `Erro ao marcar como duplicada: ${error.message}` }, { status: 500 })
         }
-        
-        await query('UPDATE player_answers SET points = $1 WHERE id = $2', [duplicatePoints, params.answerId])
-        
-        console.log('Resposta marcada como duplicada com sucesso, pontos:', duplicatePoints)
-        return NextResponse.json({ success: true })
 
       case 'resetPlayersStopStatus':
         console.log('Resetando status de parada dos jogadores:', { gameId: params.gameId })
@@ -700,6 +741,195 @@ export async function POST(request: NextRequest) {
         
         console.log('Status de parada dos jogadores resetado com sucesso')
         return NextResponse.json({ success: true })
+
+      case 'checkAllPlayersVotedOnAnswer':
+        try {
+          console.log('🔍 Verificando se todos votaram na palavra:', { answerId: params.answerId, totalPlayers: params.totalPlayers })
+          
+          // Buscar detalhes dos votos para debug
+          const voteDetailsResult = await query(
+            'SELECT player_id, is_valid, is_duplicate FROM answer_votes WHERE answer_id = $1',
+            [params.answerId]
+          )
+          
+          console.log('🔍 Detalhes dos votos encontrados:', voteDetailsResult.rows)
+          
+          // Contar quantos jogadores votaram nesta palavra (qualquer tipo de voto)
+          const voteCountResult = await query(
+            'SELECT COUNT(*) as vote_count FROM answer_votes WHERE answer_id = $1',
+            [params.answerId]
+          )
+          
+          const voteCount = parseInt(voteCountResult.rows[0].vote_count)
+          const allVoted = voteCount >= params.totalPlayers
+          
+          console.log(`🔍 Palavra ${params.answerId}: ${voteCount} votos de ${params.totalPlayers} jogadores`)
+          console.log(`🔍 Todos votaram: ${allVoted}`)
+          console.log('🔍 Votos detalhados:', voteDetailsResult.rows.map(v => ({ 
+            player_id: v.player_id, 
+            is_valid: v.is_valid, 
+            is_duplicate: v.is_duplicate 
+          })))
+          
+          // Verificar se há votos de duplicata
+          const duplicateVotesCount = voteDetailsResult.rows.filter(v => v.is_duplicate === true)
+          console.log(`🔍 Votos de duplicata encontrados: ${duplicateVotesCount.length}`)
+          
+          // Debug adicional: verificar se há algum problema com a contagem
+          if (voteCount < params.totalPlayers) {
+            console.log(`⚠️ ATENÇÃO: Apenas ${voteCount} jogadores votaram, mas esperamos ${params.totalPlayers}`)
+            
+            // Verificar se há jogadores que não votaram
+            const allPlayersResult = await query(`
+              SELECT gp.player_id, gp.player_name
+              FROM game_participants gp
+              JOIN rounds r ON gp.game_id = r.game_id
+              WHERE r.id = (SELECT round_id FROM player_answers WHERE id = $1)
+            `, [params.answerId])
+            
+            console.log('🔍 Todos os jogadores do jogo:', allPlayersResult.rows)
+            
+            const votedPlayerIds = voteDetailsResult.rows.map(v => v.player_id)
+            const allPlayerIds = allPlayersResult.rows.map(p => p.player_id)
+            const missingPlayers = allPlayerIds.filter(id => !votedPlayerIds.includes(id))
+            
+            console.log('🔍 Jogadores que votaram:', votedPlayerIds)
+            console.log('🔍 Jogadores que NÃO votaram:', missingPlayers)
+          }
+          
+          // Debug adicional: verificar se há algum problema com a lógica de votação
+          console.log('🔍 Análise detalhada:')
+          console.log('  - Total de votos encontrados:', voteCount)
+          console.log('  - Total de jogadores esperados:', params.totalPlayers)
+          console.log('  - Condição allVoted:', allVoted)
+          console.log('  - Votos por tipo:')
+          console.log('    - CERTO (is_valid = true):', voteDetailsResult.rows.filter(v => v.is_valid === true).length)
+          console.log('    - ERRADO (is_valid = false):', voteDetailsResult.rows.filter(v => v.is_valid === false).length)
+          console.log('    - IGUAL (is_duplicate = true):', voteDetailsResult.rows.filter(v => v.is_duplicate === true).length)
+          console.log('    - NULL (sem voto):', voteDetailsResult.rows.filter(v => v.is_valid === null && v.is_duplicate === null).length)
+          
+          return NextResponse.json({ success: true, data: allVoted })
+        } catch (error) {
+          console.error('❌ Erro específico em checkAllPlayersVotedOnAnswer:', error)
+          return NextResponse.json({ success: false, error: `Erro ao verificar votos: ${error.message}` }, { status: 500 })
+        }
+
+      case 'recalculateCategoryPoints':
+        console.log('Recalculando pontos da categoria:', { roundId: params.roundId, categoryId: params.categoryId })
+        
+        // Buscar todas as respostas desta categoria
+        const categoryAnswers = await query(`
+          SELECT id FROM player_answers 
+          WHERE round_id = $1 AND category_id = $2
+        `, [params.roundId, params.categoryId])
+        
+        for (const answer of categoryAnswers.rows) {
+          // Recalcular pontos baseado na maioria dos votos
+          const voteCounts = await query(`
+            SELECT 
+              SUM(CASE WHEN is_valid = true THEN 1 ELSE 0 END) as votes_for,
+              SUM(CASE WHEN is_valid = false THEN 1 ELSE 0 END) as votes_against
+            FROM answer_votes 
+            WHERE answer_id = $1
+          `, [answer.id])
+          
+          const { votes_for, votes_against } = voteCounts.rows[0]
+          const totalVotes = votes_for + votes_against
+          
+          let points = 0
+          let isValid = false
+          
+          if (totalVotes > 0) {
+            if (votes_for > votes_against) {
+              // Maioria votou CERTO - 10 pontos
+              points = 10
+              isValid = true
+            } else if (votes_against > votes_for) {
+              // Maioria votou ERRADO - 0 pontos
+              points = 0
+              isValid = false
+            } else {
+              // Empate - considerar como CERTO (10 pontos)
+              points = 10
+              isValid = true
+            }
+          }
+          
+          // Verificar se foi marcada como IGUAL pela maioria
+          const duplicateVotes = await query(`
+            SELECT COUNT(*) as duplicate_count
+            FROM player_answers 
+            WHERE id = $1 AND is_duplicate = true
+          `, [answer.id])
+          
+          const duplicateCount = parseInt(duplicateVotes.rows[0].duplicate_count)
+          const totalPlayers = await query(`
+            SELECT COUNT(*) as total
+            FROM game_participants gp
+            JOIN player_answers pa ON gp.player_name = pa.player_name
+            WHERE pa.id = $1
+          `, [answer.id])
+          
+          const totalPlayersCount = parseInt(totalPlayers.rows[0].total)
+          
+          // Se maioria marcou como IGUAL, dar 5 pontos
+          if (duplicateCount > totalPlayersCount / 2) {
+            points = 5
+            isValid = true
+          }
+          
+          await query(
+            'UPDATE player_answers SET votes_for = $1, votes_against = $2, is_valid = $3, points = $4 WHERE id = $5',
+            [votes_for, votes_against, isValid, points, answer.id]
+          )
+          
+          console.log(`Palavra ${answer.id}: ${votes_for} CERTO, ${votes_against} ERRADO, ${duplicateCount} IGUAL. Pontos: ${points}`)
+        }
+        
+        return NextResponse.json({ success: true })
+
+      case 'getPlayerTotalScore':
+        console.log('Calculando pontuação total do jogador:', { gameId: params.gameId, playerId: params.playerId })
+        
+        // Calcular pontuação total do jogador em todas as rodadas do jogo
+        const totalScoreResult = await query(`
+          SELECT COALESCE(SUM(pa.points), 0) as total_score
+          FROM player_answers pa
+          JOIN rounds r ON pa.round_id = r.id
+          WHERE r.game_id = $1 AND pa.player_id = $2
+        `, [params.gameId, params.playerId])
+        
+        const totalScore = parseInt(totalScoreResult.rows[0].total_score) || 0
+        
+        console.log(`Pontuação total do jogador ${params.playerId}: ${totalScore}`)
+        
+        return NextResponse.json({ success: true, data: totalScore })
+
+      case 'getUserVotes':
+        console.log('Buscando votos do usuário:', { roundId: params.roundId, playerId: params.playerId })
+        
+        const userVotesResult = await query(`
+          SELECT 
+            av.answer_id,
+            av.is_valid,
+            av.is_duplicate
+          FROM answer_votes av
+          JOIN player_answers pa ON av.answer_id = pa.id
+          JOIN rounds r ON pa.round_id = r.id
+          WHERE r.id = $1 AND av.player_id = $2
+        `, [params.roundId, params.playerId])
+        
+        const userVotes = userVotesResult.rows.reduce((acc, vote) => {
+          acc[vote.answer_id] = {
+            is_valid: vote.is_valid,
+            is_duplicate: vote.is_duplicate
+          }
+          return acc
+        }, {} as { [answerId: number]: { is_valid: boolean | null, is_duplicate: boolean | null } })
+        
+        console.log(`Votos encontrados para o jogador ${params.playerId}:`, userVotes)
+        
+        return NextResponse.json({ success: true, data: userVotes })
 
       default:
         return NextResponse.json({ success: false, error: 'Ação não encontrada' }, { status: 400 })

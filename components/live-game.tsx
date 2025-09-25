@@ -284,6 +284,10 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
         
         toast.success("Jogo finalizado! Verificando pontuação...")
         
+        // Limpar campos para nova partida
+        setPlayerAnswers({})
+        setHasStopped(false)
+        
         // Mostrar tela de resultados
         setTimeout(() => {
           console.log("Mostrando tela de resultados...")
@@ -343,6 +347,10 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
         gameId={gameId}
         onNewGame={() => {
           setShowResults(false)
+          // Limpar todos os campos para nova partida
+          setPlayerAnswers({})
+          setHasStopped(false)
+          setShowVoting(false)
           // Aqui você pode implementar a lógica para criar um novo jogo
           window.location.href = '/'
         }}
@@ -454,21 +462,12 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
                         <Label className="font-semibold text-lg">{category.name}</Label>
                       </div>
                       <Input
-                        placeholder={`${category.name} com ${currentRound.letter}...`}
+                        placeholder={`${category.name}...`}
                         value={playerAnswers[category.id.toString()] || ""}
                         onChange={(e) => handleAnswerChange(category.id.toString(), e.target.value)}
                         disabled={hasStopped || !currentRound || currentRound.status !== "playing"}
                         className="category-input text-lg h-12"
                       />
-                      {/* Debug info */}
-                      <div className="text-xs text-muted-foreground">
-                        Status: {currentRound?.status}, Parou: {hasStopped ? 'Sim' : 'Não'}
-                      </div>
-                      {playerAnswers[category.id.toString()] && (
-                        <div className="text-sm text-muted-foreground pl-2">
-                          {playerAnswers[category.id.toString()].length} caracteres
-                        </div>
-                      )}
                     </div>
                     )
                   })}
