@@ -12,8 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { History, Trophy, RefreshCw } from "lucide-react"
 import Link from "next/link"
-import { cleanupExpiredData } from "@/lib/api-client"
-import { getUserSession, clearUserSession } from "@/lib/session"
+import { getGame, getGameRoom } from "@/lib/api-client"
+import { getUserSession, clearUserSession, updateUserSession } from "@/lib/session"
 
 type GamePhase = 'room-selection' | 'lobby' | 'playing' | 'evaluation' | 'finished'
 
@@ -31,12 +31,102 @@ interface GameSession {
 export default function StopGame() {
   const [gamePhase, setGamePhase] = useState<GamePhase>('room-selection')
   const [gameSession, setGameSession] = useState<GameSession | null>(null)
+  const [isRestoring, setIsRestoring] = useState(true)
+
+  // Restaurar sessão do localStorage ao carregar a página
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const session = getUserSession()
+        if (!session) {
+          setIsRestoring(false)
+          return
+        }
+
+        console.log("Sessão encontrada no localStorage:", session)
+
+        if (session.gameId && session.roomCode) {
+          await restoreActiveGame(session)
+        } else {
+          restoreBasicSession(session)
+        }
+      } catch (error) {
+        console.error("Erro ao restaurar sessão:", error)
+        clearUserSession()
+      } finally {
+        setIsRestoring(false)
+      }
+    }
+
+    const restoreActiveGame = async (session: any) => {
+      try {
+        const game = await getGame(session.gameId)
+        const room = await getGameRoom(session.roomCode)
+
+        if (game && room) {
+          console.log("Jogo e sala ainda existem, restaurando sessão...")
+          
+          setGameSession({
+            roomCode: session.roomCode,
+            playerName: session.playerName,
+            playerId: session.playerId,
+            gameId: session.gameId,
+            isHost: session.isHost || false,
+            currentRound: game.current_round || 1,
+            currentLetter: '',
+            roundId: 0
+          })
+
+          // Determinar fase do jogo
+          if (game.status === 'waiting' || game.status === 'playing' || game.status === 'scoring') {
+            setGamePhase('playing')
+          } else if (game.status === 'finished') {
+            setGamePhase('finished')
+          } else {
+            setGamePhase('lobby')
+          }
+
+          console.log("Sessão restaurada com sucesso!")
+        } else {
+          console.log("Jogo ou sala não existem mais, limpando sessão...")
+          clearUserSession()
+        }
+      } catch (error) {
+        console.error("Erro ao verificar jogo/sala:", error)
+        clearUserSession()
+      }
+    }
+
+    const restoreBasicSession = (session: any) => {
+      setGameSession({
+        roomCode: session.roomCode || '',
+        playerName: session.playerName,
+        playerId: session.playerId,
+        gameId: 0,
+        isHost: session.isHost || false,
+        currentRound: 1,
+        currentLetter: '',
+        roundId: 0
+      })
+      setGamePhase('lobby')
+    }
+
+    restoreSession()
+  }, [])
 
 
 
   const handleRoomJoined = (roomCode: string, playerName: string, isHost: boolean) => {
     const session = getUserSession()
     if (session) {
+      const newSession = {
+        ...session,
+        roomCode,
+        playerName,
+        isHost
+      }
+      updateUserSession(newSession)
+      
       setGameSession({
         roomCode,
         playerName,
@@ -50,6 +140,16 @@ export default function StopGame() {
     } else {
       // Fallback se não houver sessão
       const playerId = Math.floor(Math.random() * 1000000)
+      const newSession = {
+        playerId,
+        playerName,
+        sessionId: Math.random().toString(36).substring(2) + Date.now().toString(36),
+        roomCode,
+        isHost,
+        createdAt: Date.now()
+      }
+      updateUserSession(newSession)
+      
       setGameSession({
         roomCode,
         playerName,
@@ -66,21 +166,14 @@ export default function StopGame() {
 
   const handleGameStart = (gameId: number) => {
     if (gameSession) {
+      // Atualizar sessão no localStorage
+      updateUserSession({ gameId })
+      
       setGameSession(prev => prev ? { ...prev, gameId } : null)
       setGamePhase('playing')
     }
   }
 
-  const handleEvaluationStart = (roundId: number, currentLetter: string) => {
-    if (gameSession) {
-      setGameSession(prev => prev ? { 
-        ...prev, 
-        roundId, 
-        currentLetter 
-      } : null)
-      setGamePhase('evaluation')
-    }
-  }
 
   const handleEvaluationComplete = () => {
     if (gameSession) {
@@ -89,8 +182,8 @@ export default function StopGame() {
         currentRound: prev.currentRound + 1 
       } : null)
       
-      // Verificar se chegou ao fim das 10 rodadas
-      if (gameSession.currentRound >= 10) {
+      // Verificar se chegou ao fim das 5 rodadas
+      if (gameSession.currentRound >= 5) {
         setGamePhase('finished')
       } else {
         setGamePhase('playing')
@@ -102,6 +195,27 @@ export default function StopGame() {
     clearUserSession()
     setGamePhase('room-selection')
     setGameSession(null)
+  }
+
+  // Mostrar tela de carregamento enquanto restaura a sessão
+  if (isRestoring) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background via-muted/30 to-background p-4">
+        <div className="max-w-7xl mx-auto pt-20">
+          <Card className="game-card">
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-[var(--game-teal)]" />
+                <p>Restaurando sessão...</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Verificando se você tem um jogo em andamento
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -184,7 +298,7 @@ export default function StopGame() {
                 <div className="text-center space-y-4">
                   <Trophy className="w-16 h-16 mx-auto text-yellow-500" />
                   <p className="text-lg text-muted-foreground">
-                    Parabéns! Você completou todas as 10 rodadas.
+                    Parabéns! Você completou todas as 5 rodadas.
                   </p>
                   <p className="text-sm text-muted-foreground">
                     Os dados da partida foram limpos automaticamente.

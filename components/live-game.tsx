@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,7 +14,6 @@ import {
   Trophy, 
   RefreshCw,
   CheckCircle,
-  XCircle,
   AlertCircle
 } from "lucide-react"
 import { 
@@ -22,25 +21,25 @@ import {
   getGameParticipants, 
   getCurrentRound, 
   savePlayerAnswer,
-  getRoundAnswers,
-  updatePlayerStopStatus,
-  checkAllPlayersStopped,
   getGameStats,
-  endRound,
   createRound,
   startRound,
   getGameCategories,
-  stopGameForAll
+  stopGameForAll,
+  updateGameStatus,
+  updateRoomStatus,
+  finalizeGame,
+  resetPlayersStopStatus
 } from "@/lib/api-client"
 import { toast } from "sonner"
 import VotingScreen from "./voting-screen"
 import GameResults from "./game-results"
 
 interface LiveGameProps {
-  gameId: number
-  playerName: string
-  playerId: number
-  roomCode: string
+  readonly gameId: number
+  readonly playerName: string
+  readonly playerId: number
+  readonly roomCode: string
 }
 
 interface Participant {
@@ -76,6 +75,7 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
   const [showVoting, setShowVoting] = useState(false)
   const [stoppingGame, setStoppingGame] = useState(false)
   const [showResults, setShowResults] = useState(false)
+  const [isCreatingRound, setIsCreatingRound] = useState(false)
 
   const fetchGameData = async () => {
     try {
@@ -106,6 +106,11 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
       // Verificar se o jogador atual já parou
       const currentParticipant = participantsData.find(p => p.id === playerId)
       if (currentParticipant) {
+        console.log("Status do jogador atual:", {
+          playerId,
+          hasStopped: currentParticipant.has_stopped,
+          totalScore: currentParticipant.total_score
+        })
         setHasStopped(currentParticipant.has_stopped)
       }
       
@@ -213,28 +218,55 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
   const handleVotingComplete = async () => {
     console.log("Votação concluída! Verificando se deve avançar para próxima rodada...")
     
+    // Prevenir múltiplas chamadas simultâneas
+    if (isCreatingRound) {
+      console.log("Já está criando uma nova rodada, ignorando...")
+      return
+    }
+    
     try {
+      setIsCreatingRound(true)
+      
       // Verificar se há mais rodadas para jogar
       const currentRoundNumber = currentRound?.round_number || 1
-      const maxRounds = 10
+      const maxRounds = 5
       
       console.log(`Rodada atual: ${currentRoundNumber} de ${maxRounds}`)
       
-      if (currentRoundNumber < maxRounds) {
-        console.log(`Avançando para rodada ${currentRoundNumber + 1}...`)
-        
-        // Criar nova rodada
-        const newRound = await createRound(gameId, currentRoundNumber + 1)
-        console.log("Nova rodada criada:", newRound)
-        
-        if (newRound) {
-          // Atualizar status do jogo para 'playing'
-          await updateGameStatus(gameId, 'playing')
+       if (currentRoundNumber < maxRounds) {
+         console.log(`Avançando para rodada ${currentRoundNumber + 1}...`)
+         
+         // Resetar estado do jogo ANTES de criar nova rodada
+         setShowVoting(false)
+         setPlayerAnswers({})
+         setHasStopped(false)
+         
+         // Criar nova rodada
+         const newRound = await createRound(gameId, currentRoundNumber + 1)
+         console.log("Nova rodada criada:", newRound)
+         
+         if (newRound) {
+           console.log("Nova rodada criada, iniciando automaticamente...")
+           
+           // Iniciar a nova rodada automaticamente
+           await startRound(newRound.id)
+           
+           // Atualizar status do jogo para 'playing'
+           await updateGameStatus(gameId, 'playing')
+           
+           // Atualizar status da sala para 'playing'
+           await updateRoomStatus(roomCode, 'playing')
+           
+           // Resetar status dos jogadores no banco
+           await resetPlayersStopStatus(gameId)
           
-          // Atualizar status da sala para 'playing'
-          await updateRoomStatus(roomCode, 'playing')
-          
-          toast.success(`Rodada ${currentRoundNumber + 1} iniciada!`)
+           console.log("Estado do jogo resetado:", {
+             showVoting: false,
+             playerAnswers: {},
+             hasStopped: false
+           })
+           
+           toast.success(`Rodada ${currentRoundNumber + 1} iniciada!`)
           
           // Recarregar dados do jogo
           setTimeout(() => {
@@ -247,7 +279,8 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
         console.log("Todas as rodadas foram concluídas! Finalizando jogo...")
         
         // Finalizar jogo e calcular pontuação final
-        await finalizeGame(gameId)
+        const finalizeResult = await finalizeGame(gameId)
+        console.log("Resultado da finalização:", finalizeResult)
         
         toast.success("Jogo finalizado! Verificando pontuação...")
         
@@ -260,6 +293,8 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
     } catch (error) {
       console.error("Erro ao finalizar votação:", error)
       toast.error("Erro ao processar votação")
+    } finally {
+      setIsCreatingRound(false)
     }
   }
 
@@ -324,11 +359,12 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
     roundStatus: currentRound?.status
   })
   
-  // Mostrar tela de votação se o jogo está em scoring OU se showVoting é true
-  if ((showVoting || game?.status === "scoring") && currentRound) {
+  // Mostrar tela de votação apenas se o jogo está em scoring E há uma rodada ativa
+  if (game?.status === "scoring" && currentRound && currentRound.status === "scoring") {
     console.log("Renderizando tela de votação para roundId:", currentRound.id)
     return (
       <VotingScreen
+        key={`voting-${currentRound.id}-${currentRound.round_number}`}
         gameId={gameId}
         roundId={currentRound.id}
         letter={currentRound.letter}
@@ -373,7 +409,7 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
                     Letra: {currentRound.letter}
                   </Badge>
                   <Badge variant="outline" className="text-lg px-3 py-1">
-                    Rodada {currentRound.round_number}/10
+                    Rodada {currentRound.round_number}/5
                   </Badge>
                 </div>
               </div>
@@ -424,6 +460,10 @@ export function LiveGame({ gameId, playerName, playerId, roomCode }: LiveGamePro
                         disabled={hasStopped || !currentRound || currentRound.status !== "playing"}
                         className="category-input text-lg h-12"
                       />
+                      {/* Debug info */}
+                      <div className="text-xs text-muted-foreground">
+                        Status: {currentRound?.status}, Parou: {hasStopped ? 'Sim' : 'Não'}
+                      </div>
                       {playerAnswers[category.id.toString()] && (
                         <div className="text-sm text-muted-foreground pl-2">
                           {playerAnswers[category.id.toString()].length} caracteres

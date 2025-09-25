@@ -126,7 +126,8 @@ export async function POST(request: NextRequest) {
             { name: 'Lugar', description: 'Local, cidade, país, etc.' },
             { name: 'Profissão', description: 'Ocupação ou trabalho' },
             { name: 'Cor', description: 'Nome de cor' },
-            { name: 'Marca', description: 'Marca comercial' }
+            { name: 'Marca', description: 'Marca comercial' },
+            { name: 'Meu Chefe é', description: 'Características ou descrições de chefe' }
           ]
           
           for (let i = 0; i < defaultCategories.length; i++) {
@@ -140,8 +141,8 @@ export async function POST(request: NextRequest) {
             )
           }
         } else {
-          // Usar apenas as primeiras 8 categorias para evitar duplicação
-          const categoriesToUse = categoriesResult.rows.slice(0, 8)
+          // Usar todas as categorias ativas disponíveis
+          const categoriesToUse = categoriesResult.rows
           for (let i = 0; i < categoriesToUse.length; i++) {
             console.log(`Inserindo categoria ${i + 1}:`, categoriesToUse[i].name, "ID:", categoriesToUse[i].id)
             await query(
@@ -234,12 +235,6 @@ export async function POST(request: NextRequest) {
         )
         return NextResponse.json({ success: true })
 
-      case 'createRound':
-        const roundResult = await query(
-          'INSERT INTO rounds (game_id, round_number, letter, duration) VALUES ($1, $2, $3, $4) RETURNING *',
-          [params.gameId, params.roundNumber, params.letter, 60]
-        )
-        return NextResponse.json({ success: true, data: roundResult.rows[0] })
 
       case 'startRound':
         await query('UPDATE rounds SET status = $1, start_time = $2 WHERE id = $3', ['playing', new Date(), params.roundId])
@@ -390,7 +385,8 @@ export async function POST(request: NextRequest) {
           { name: 'Lugar', description: 'Local, cidade, país, etc.' },
           { name: 'Profissão', description: 'Ocupação ou trabalho' },
           { name: 'Cor', description: 'Nome de cor' },
-          { name: 'Marca', description: 'Marca comercial' }
+          { name: 'Marca', description: 'Marca comercial' },
+          { name: 'Meu Chefe é', description: 'Características ou descrições de chefe' }
         ]
         
         for (let i = 0; i < defaultCategories.length; i++) {
@@ -612,6 +608,9 @@ export async function POST(request: NextRequest) {
           RETURNING *
         `, [params.gameId, params.roundNumber, newRandomLetter])
         
+        // Atualizar current_round no jogo
+        await query('UPDATE games SET current_round = $1 WHERE id = $2', [params.roundNumber, params.gameId])
+        
         console.log('Nova rodada criada:', newRoundResult.rows[0])
         return NextResponse.json({ success: true, data: newRoundResult.rows[0] })
 
@@ -691,6 +690,15 @@ export async function POST(request: NextRequest) {
         await query('UPDATE player_answers SET points = $1 WHERE id = $2', [duplicatePoints, params.answerId])
         
         console.log('Resposta marcada como duplicada com sucesso, pontos:', duplicatePoints)
+        return NextResponse.json({ success: true })
+
+      case 'resetPlayersStopStatus':
+        console.log('Resetando status de parada dos jogadores:', { gameId: params.gameId })
+        
+        // Resetar status de parada de todos os jogadores do jogo
+        await query('UPDATE game_participants SET has_stopped = false, stopped_at = NULL WHERE game_id = $1', [params.gameId])
+        
+        console.log('Status de parada dos jogadores resetado com sucesso')
         return NextResponse.json({ success: true })
 
       default:

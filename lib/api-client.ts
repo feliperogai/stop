@@ -58,7 +58,7 @@ export async function joinGameRoom(roomCode: string, playerId: number, playerNam
 }
 
 // Funções de Game
-export async function createGame(roomId: number, maxRounds = 10) {
+export async function createGame(roomId: number, maxRounds = 5) {
   const result = await apiCall('createGame', { roomId, maxRounds })
   return result.success ? result.data : null
 }
@@ -255,5 +255,10 @@ export async function getGameResults(gameId: number) {
 
 export async function markAnswerAsDuplicate(answerId: number, playerId: number) {
   const result = await apiCall('markAnswerAsDuplicate', { answerId, playerId })
+  return result.success
+}
+
+export async function resetPlayersStopStatus(gameId: number) {
+  const result = await apiCall('resetPlayersStopStatus', { gameId })
   return result.success
 }

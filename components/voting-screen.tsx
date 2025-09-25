@@ -5,16 +5,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { CheckCircle, XCircle, Users, Clock, ThumbsUp, ThumbsDown } from "lucide-react"
-import { getGameParticipants, getPlayerAnswers, voteOnAnswer, getVotingResults, markPlayerReadyForNextCategory, getPlayersReadyForCategory } from "@/lib/api-client"
+import { CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown } from "lucide-react"
+import { getGameParticipants, getPlayerAnswers, voteOnAnswer, getVotingResults, markPlayerReadyForNextCategory, getPlayersReadyForCategory, saveRoundScore, updatePlayerScore } from "@/lib/api-client"
 import { getUserSession } from "@/lib/session"
+import { calculateRoundScores } from "@/lib/scoring"
 import { toast } from "sonner"
 
 interface VotingScreenProps {
-  gameId: number
-  roundId: number
-  letter: string
-  onVotingComplete: () => void
+  readonly gameId: number
+  readonly roundId: number
+  readonly letter: string
+  readonly onVotingComplete: () => void
 }
 
 interface PlayerAnswer {
@@ -44,23 +45,29 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
   const [currentCategory, setCurrentCategory] = useState("")
   const [totalCategories, setTotalCategories] = useState(0)
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0)
-  const [playerVotes, setPlayerVotes] = useState<{ [answerId: number]: boolean }>({})
   const [playersReady, setPlayersReady] = useState<any[]>([])
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [isReadyForNext, setIsReadyForNext] = useState(false)
-  const [duplicateAnswers, setDuplicateAnswers] = useState<{ [answerId: number]: boolean }>({})
+  const [isTransitioning, setIsTransitioning] = useState(false)
 
   useEffect(() => {
     const session = getUserSession()
     if (session) {
       setCurrentPlayerId(session.playerId)
     }
+    
+    // Resetar estado quando o roundId muda (nova rodada)
+    setCurrentCategoryIndex(0)
+    setIsReadyForNext(false)
+    setIsTransitioning(false)
+    setPlayersReady([])
+    
     fetchVotingData()
   }, [gameId, roundId])
 
   // Verificar se todos já estão prontos quando os dados carregam (apenas uma vez)
   useEffect(() => {
-    if (totalPlayers > 0 && currentCategoryIndex >= 0 && !isReadyForNext) {
+    if (totalPlayers > 0 && currentCategoryIndex >= 0 && !isReadyForNext && !loading && !isTransitioning) {
       console.log("🔍 Verificando se todos já estão prontos na categoria:", currentCategoryIndex)
       // Verificar uma única vez quando os dados carregam
       const timeout = setTimeout(() => {
@@ -68,7 +75,7 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
       }, 3000)
       return () => clearTimeout(timeout)
     }
-  }, [totalPlayers, currentCategoryIndex])
+  }, [totalPlayers, currentCategoryIndex, loading, isTransitioning])
 
   // Verificar periodicamente se todos estão prontos (apenas quando necessário)
   useEffect(() => {
@@ -146,7 +153,6 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
         console.log("Respostas para esta categoria:", answersByCategory[currentCategory])
       } else {
         console.log("Nenhuma categoria encontrada!")
-        votingComplete = true
       }
 
       const votingDataToSet = {
@@ -184,6 +190,7 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
       toast.error("Erro ao carregar dados de votação")
     } finally {
       setLoading(false)
+      setIsTransitioning(false)
     }
   }
 
@@ -248,7 +255,6 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
         console.log("Respostas para esta categoria:", answersByCategory[currentCategory])
       } else {
         console.log("Nenhuma categoria encontrada!")
-        votingComplete = true
       }
 
       const votingDataToSet = {
@@ -393,6 +399,9 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
           const nextIndex = currentCategoryIndex + 1
           console.log("Avançando para categoria:", nextIndex, "de", totalCategories)
           
+          // Marcar como em transição para evitar conflitos
+          setIsTransitioning(true)
+          
           // Atualizar categoria
           console.log("Atualizando currentCategoryIndex de", currentCategoryIndex, "para", nextIndex)
           setCurrentCategoryIndex(nextIndex)
@@ -406,7 +415,8 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
           }, 1000)
         } else {
           console.log("🏁 Todas as categorias foram votadas!")
-          // Todas as categorias foram votadas
+          // Todas as categorias foram votadas - calcular pontos
+          await calculateAndSaveScores()
           onVotingComplete()
         }
       } else {
@@ -423,6 +433,79 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
     }
   }
   
+  const calculateAndSaveScores = async () => {
+    try {
+      console.log("Calculando pontuações da rodada...")
+      
+      // Buscar todas as respostas da rodada
+      const allAnswers = await getPlayerAnswers(roundId)
+      console.log("Respostas encontradas:", allAnswers.length)
+      
+      if (allAnswers.length === 0) {
+        console.log("Nenhuma resposta encontrada para calcular pontos")
+        return
+      }
+      
+      // Buscar participantes do jogo
+      const participants = await getGameParticipants(gameId)
+      console.log("Participantes:", participants.length)
+      
+      // Agrupar respostas por jogador
+      const playersAnswers: { [playerId: string]: { [categoryId: string]: string } } = {}
+      
+      for (const answer of allAnswers) {
+        if (!playersAnswers[answer.player_id]) {
+          playersAnswers[answer.player_id] = {}
+        }
+        playersAnswers[answer.player_id][answer.category_id] = answer.answer
+      }
+      
+      // Buscar categorias do jogo
+      const categories = allAnswers.reduce((acc: any[], answer) => {
+        if (!acc.find(cat => cat.id === answer.category_id)) {
+          acc.push({
+            id: answer.category_id.toString(),
+            name: answer.category_name || `Categoria ${answer.category_id}`
+          })
+        }
+        return acc
+      }, [])
+      
+      console.log("Categorias encontradas:", categories.length)
+      
+      // Calcular pontuações usando a lógica existente
+      const results = calculateRoundScores(playersAnswers, categories, letter)
+      console.log("Resultados calculados:", results.length)
+      
+      // Salvar pontuações no banco
+      for (const result of results) {
+        console.log(`Salvando pontos para jogador ${result.playerId}: ${result.finalScore} pts`)
+        
+        await saveRoundScore(
+          roundId,
+          parseInt(result.playerId),
+          result.totalPoints,
+          result.bonusPoints,
+          results.indexOf(result) + 1
+        )
+        
+        // Atualizar pontuação total do jogador
+        const participant = participants.find(p => p.id === parseInt(result.playerId))
+        if (participant) {
+          const newTotalScore = participant.total_score + result.finalScore
+          console.log(`Atualizando pontuação total do jogador ${participant.player_name}: ${participant.total_score} + ${result.finalScore} = ${newTotalScore}`)
+          await updatePlayerScore(gameId, parseInt(result.playerId), newTotalScore)
+        }
+      }
+      
+      console.log("Pontuações calculadas e salvas com sucesso!")
+      
+    } catch (error) {
+      console.error("Erro ao calcular pontuações:", error)
+      toast.error("Erro ao calcular pontuações")
+    }
+  }
+
   const checkAllPlayersReady = async () => {
     try {
       const readyPlayers = await getPlayersReadyForCategory(gameId, currentCategoryIndex)
@@ -662,7 +745,7 @@ export default function VotingScreen({ gameId, roundId, letter, onVotingComplete
                   <div className="flex justify-center gap-2">
                     {playersReady.map((player, index) => (
                       <Badge 
-                        key={index}
+                        key={player.player_id}
                         variant={player.is_ready ? "default" : "outline"}
                         className={player.is_ready ? "bg-green-600" : ""}
                       >

@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS games (
     id SERIAL PRIMARY KEY,
     room_id INTEGER REFERENCES game_rooms(id) ON DELETE CASCADE,
     current_round INTEGER DEFAULT 1,
-    max_rounds INTEGER DEFAULT 10, -- 10 rodadas por partida
+    max_rounds INTEGER DEFAULT 5, -- 5 rodadas por partida
     current_letter CHAR(1),
     round_start_time TIMESTAMP,
     round_duration INTEGER DEFAULT 60, -- em segundos
@@ -233,5 +233,6 @@ INSERT INTO categories (name, description) VALUES
 ('Lugar', 'Local, cidade, país, etc.'),
 ('Profissão', 'Ocupação ou trabalho'),
 ('Cor', 'Nome de cor'),
-('Marca', 'Marca comercial')
+('Marca', 'Marca comercial'),
+('Meu Chefe é', 'Características ou descrições de chefe')
 ON CONFLICT DO NOTHING;
